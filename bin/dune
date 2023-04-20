@@ -1,0 +1,4 @@
+(executable
+ (public_name ojmpst)
+ (name main)
+ (libraries ojmpst))
