@@ -1,0 +1,7 @@
+(library
+ (name ojmpst_ppx)
+ (public_name ojmpst.ppx)
+ (kind ppx_rewriter)
+ (libraries ppxlib)
+ (preprocess
+  (staged_pps ppx_import ppxlib.metaquot ppx_deriving.show)))
