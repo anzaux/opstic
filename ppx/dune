@@ -4,4 +4,4 @@
  (kind ppx_rewriter)
  (libraries ppxlib)
  (preprocess
-  (staged_pps ppx_import ppxlib.metaquot ppx_deriving.show)))
+  (pps ppxlib.metaquot ppx_deriving.show)))
