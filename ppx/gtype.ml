@@ -9,19 +9,19 @@ let pp_expr = Pprintast.expression
 type pvar = string loc [@@deriving show]
 type var = string loc [@@deriving show]
 type role = string loc [@@deriving show]
-type lbl = string [@@deriving show]
+type label = string [@@deriving show]
 type expr = Ast.expression
 
 type t_ =
-  | LetRecG : pvar * var list * t * t -> t_ (* let rec f x y = .. in e *)
-  | CallG : pvar * expr list -> t_ (* F<exprs> *)
-  | MessageG : role * lbl * role * expr * t -> t_
+  | MessageG : role * label * role * expr * t -> t_
   (* a#lab ==> b :: expr >> gtyp *)
   | ChoiceG : role * t list -> t_ (* a >>? [gtyp1; gtyp2; ..]*)
   | EndG : t_ (* end *)
   | ErrG : string -> t_
+  | LetRecG : pvar * var list * t * t -> t_ (* let rec f x y = .. in e *)
+  | CallG : pvar * expr list -> t_ (* f e1 e2 .. *)
 (* | Routed :
-    role * lbl * role * role * expr * t
+    role * label * role * role * expr * t
     -> t_ *)
 (* a#lab = c ==> b :: expr >> gtyp *)
 [@@deriving show]
@@ -41,7 +41,7 @@ let role_of_exp exp =
   Ast_pattern.(parse (pexp_ident (lident __'))) exp.pexp_loc exp (fun x -> x)
 
 let role_label_of_exp exp =
-  (* split `r#lbl` into (r,lbl) *)
+  (* split `r#label` into (r,label) *)
   Ast_pattern.(parse (pexp_send (pexp_ident (lident __')) __)) exp.pexp_loc exp
     (fun r lbl -> (r, lbl))
 
@@ -78,11 +78,11 @@ let rec parse (exp : expression) : t =
           let alts = List.map parse alts in
           { txt = ChoiceG (r, alts); loc = exp.pexp_loc }
       | e ->
-          (* prefix without continuation, or recursive call.
+          (* prefix without sequencing, or recursive call.
              e.g.,
              (r1#lbl) ==> (r2::payload)
              or
-             (r1#lbl) = s) ==> (r2::payload)
+             (r1#lbl) = (s) ==> (r2::payload)
              or
              f e1 e2 ... en
           *)

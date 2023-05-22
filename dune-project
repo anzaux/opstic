@@ -19,7 +19,7 @@
  (name ojmpst)
  (synopsis "A short synopsis")
  (description "A longer description")
- (depends ocaml dune)
+ (depends ocaml dune (ppxlib (>= :"0.19.0")) ppx_deriving (ounit :with-test) ppx_inline_test)
  (tags
   (topics "to describe" your project)))
 
