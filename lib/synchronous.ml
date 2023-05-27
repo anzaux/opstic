@@ -66,7 +66,7 @@ let test_make_witness_ab () =
             {
               out_role = "a";
               out_label = "lab";
-              out_marshal = MarshalPayload.to_dyn;
+              out_marshal = (MarshalPayload.to_dyn : int -> payload);
               out_next_wit =
                 object
                   method a =
@@ -78,7 +78,8 @@ let test_make_witness_ab () =
                               choice_label = "lab2";
                               choice_variant = { make_var = (fun x -> `lab2 x) };
                               choice_next_wit = ();
-                              choice_marshal = MarshalPayload.from_dyn;
+                              choice_marshal =
+                                (MarshalPayload.from_dyn : payload -> unit);
                             } );
                         ( "lab3",
                           Choice
@@ -86,7 +87,8 @@ let test_make_witness_ab () =
                               choice_label = "lab3";
                               choice_variant = { make_var = (fun x -> `lab3 x) };
                               choice_next_wit = ();
-                              choice_marshal = MarshalPayload.from_dyn;
+                              choice_marshal =
+                                (MarshalPayload.from_dyn : payload -> unit);
                             } );
                       ]
                 end;
@@ -108,8 +110,7 @@ let debug str =
   print_endline str
 
 let%test "test_comm" =
-  let ep_a, ep_b = test_make_witness_ab () in
-  let thread_a () =
+  let thread_a ep_a () =
     let ep = ep_a in
     debug "thread A: receiving";
     let (`lab (_, ep)) = receive ep (fun x -> x#b) in
@@ -117,23 +118,26 @@ let%test "test_comm" =
     if Random.bool () then close @@ send ep (fun x -> x#b#lab2) ()
     else close @@ send ep (fun x -> x#b#lab3) ()
   in
-  let thread_b () =
+  let thread_b ep_b () =
     let ep = ep_b in
     debug "thread B: sending";
     let ep = send ep (fun x -> x#a#lab) 10 in
     debug "thread B: receiving";
     match receive ep (fun x -> x#a) with
-    | `lab2 (_, (ep : unit ep)) ->
+    | `lab2 (_, ep) ->
         debug "thread B: received lab2";
         close ep
-    | `lab3 (_, (ep : unit ep)) ->
+    | `lab3 (_, ep) ->
         debug "thread B: received lab3";
         close ep
   in
   debug "running test";
   Random.init (int_of_float @@ Unix.time ());
   flush stdout;
-  let ts = [ thread_a; thread_b ] |> List.map (fun f -> Thread.create f ()) in
+  let ep_a, ep_b = test_make_witness_ab () in
+  let ts =
+    [ thread_a ep_a; thread_b ep_b ] |> List.map (fun f -> Thread.create f ())
+  in
   let success = ref false in
   ignore
   @@ Thread.create

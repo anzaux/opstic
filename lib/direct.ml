@@ -37,9 +37,7 @@ module Endpoint = struct
 end
 
 module Witness = struct
-  type ('m, 'v) variant = {
-    make_var : 'v -> 'm; (* match_var : 'm -> 'v option  *)
-  }
+  type ('m, 'x) variant = { make_var : 'x -> 'm (* 'x -> [> `lab of 'x] *) }
 
   type 'm choice =
     | Choice : {
@@ -54,6 +52,7 @@ module Witness = struct
     inp_role : string;
     inp_choices : (string, 'm choice) Hashtbl.t;
   }
+    constraint 'm = [> ]
 
   let make_inp ~role (xs : (string * 'm choice) list) : 'm inp =
     let tbl = Hashtbl.create (List.length xs) in
@@ -80,25 +79,25 @@ module Comm = struct
   type 'a ep = 'a Endpoint.t
 
   let send : 'a 'b. 'a ep -> ('a -> ('v, 'b) out) -> 'v -> 'b ep =
-   fun ep call v ->
-    let out : ('v, 'b) out = call @@ Lin.get ep.ep_witness in
+   fun ep call (*fun x -> x#a#lab*) v ->
+    let out : ('v, 'b) out = call (Lin.get ep.ep_witness) in
     let raw_ch = Hashtbl.find ep.ep_raw out.out_role in
     raw_ch.send (out.out_label, out.out_marshal v);
     { ep with ep_witness = Lin.create out.out_next_wit }
 
   let receive : type a. a ep -> (a -> ([> ] as 'b) inp) -> 'b =
-   fun ep call ->
+   fun ep call (*fun x -> x#a*) ->
     let inp = call @@ Lin.get ep.ep_witness in
     let raw_ch = Hashtbl.find ep.ep_raw inp.inp_role in
     let label, v = raw_ch.receive () in
     let (Choice c) = Hashtbl.find inp.inp_choices label in
     let v = c.choice_marshal v in
-    c.choice_variant.make_var
+    c.choice_variant.make_var (*fun x -> `lab x*)
       (v, { ep with ep_witness = Lin.create c.choice_next_wit })
 
   let close (ep : unit ep) =
     ignore @@ Lin.get ep.ep_witness;
-    Hashtbl.iter (fun _ ch -> ch.Endpoint.close ())
+    Hashtbl.iter (fun _ ch -> ch.Endpoint.close ()) ep.ep_raw
 end
 
 module type CHAN = sig
