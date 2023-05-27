@@ -154,7 +154,7 @@ let%test "test_lin" =
   debug "checking that linearity violation check is working fine";
   let ep_a, ep_b = test_make_witness_ab () in
   try
-    let f ep = send ep (fun x -> x#a#lab) () in
+    let f ep = send ep (fun x -> x#a#lab) 123 in
     ignore @@ Thread.create (fun () -> ignore @@ receive ep_a (fun x -> x#b)) ();
     ignore @@ f ep_b;
     ignore @@ f ep_b;
