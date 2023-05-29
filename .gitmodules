@@ -1,0 +1,3 @@
+[submodule "vendors/prr"]
+	path = vendors/prr
+	url = https://github.com/kxcdev/prr.git
