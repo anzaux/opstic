@@ -1,3 +1,10 @@
+module Direct = Ojmpst.Make (struct
+  type 'x t = 'x
+
+  let return x = x
+  let bind x f = f x
+end)
+open Ojmpst
 open Direct
 
 module MarshalPayload = struct

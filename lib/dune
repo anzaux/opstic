@@ -1,6 +1,4 @@
 (library
  (name ojmpst)
  (public_name ojmpst)
- (inline_tests)
- (libraries threads)
- (preprocess (pps ppx_inline_test)))
+ (libraries threads))
