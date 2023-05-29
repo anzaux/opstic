@@ -32,8 +32,8 @@ end
 module Make (Io : Monadic) = struct
   module Endpoint = struct
     type raw_channel = {
-      send : string * payload -> unit;
-      receive : unit -> string * payload;
+      send : string * payload -> unit Io.t;
+      receive : unit -> (string * payload) Io.t;
       close : unit -> unit;
     }
 
@@ -86,22 +86,25 @@ module Make (Io : Monadic) = struct
     type ('v, 'a) out = ('v, 'a) Witness.out
     type 'a ep = 'a Endpoint.t
 
-    let send : 'a 'b. 'a ep -> ('a -> ('v, 'b) out) -> 'v -> 'b ep =
+    let send : 'a 'b. 'a ep -> ('a -> ('v, 'b) out) -> 'v -> 'b ep Io.t =
      fun ep call (*fun x -> x#a#lab*) v ->
       let out : ('v, 'b) out = call (Lin.get ep.ep_witness) in
       let raw_ch = Hashtbl.find ep.ep_raw out.out_role in
-      raw_ch.send (out.out_label, out.out_marshal v);
-      { ep with ep_witness = Lin.create out.out_next_wit }
+      Io.bind
+        (raw_ch.send (out.out_label, out.out_marshal v))
+        (fun () ->
+          Io.return { ep with ep_witness = Lin.create out.out_next_wit })
 
-    let receive : type a. a ep -> (a -> ([> ] as 'b) inp) -> 'b =
+    let receive : type a. a ep -> (a -> ([> ] as 'b) inp) -> 'b Io.t =
      fun ep call (*fun x -> x#a*) ->
       let inp = call @@ Lin.get ep.ep_witness in
       let raw_ch = Hashtbl.find ep.ep_raw inp.inp_role in
-      let label, v = raw_ch.receive () in
-      let (Choice c) = Hashtbl.find inp.inp_choices label in
-      let v = c.choice_marshal v in
-      c.choice_variant.make_var (*fun x -> `lab x*)
-        (v, { ep with ep_witness = Lin.create c.choice_next_wit })
+      Io.bind (raw_ch.receive ()) (fun (label, v) ->
+          let (Choice c) = Hashtbl.find inp.inp_choices label in
+          let v = c.choice_marshal v in
+          Io.return
+            (c.choice_variant.make_var (*fun x -> `lab x*)
+               (v, { ep with ep_witness = Lin.create c.choice_next_wit })))
 
     let close (ep : unit ep) =
       ignore @@ Lin.get ep.ep_witness;
@@ -111,8 +114,8 @@ module Make (Io : Monadic) = struct
   module type CHAN = sig
     type t
 
-    val send : t -> string * payload -> unit
-    val receive : t -> string * payload
+    val send : t -> string * payload -> unit Io.t
+    val receive : t -> (string * payload) Io.t
     val create : unit -> t
   end
 
