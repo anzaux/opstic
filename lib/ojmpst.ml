@@ -1,4 +1,6 @@
-type payload = (string * bytes) list
+module type Payload = sig
+  type payload
+end
 
 module type Monadic = sig
   type _ t
@@ -29,7 +31,9 @@ end = struct
     else raise LinearityViolation
 end
 
-module Make (Io : Monadic) = struct
+module Make (P : Payload) (Io : Monadic) = struct
+  open P
+
   module Endpoint = struct
     type raw_channel = {
       send : string * payload -> unit Io.t;

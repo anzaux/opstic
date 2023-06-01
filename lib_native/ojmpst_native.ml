@@ -1,9 +1,19 @@
-module Direct = Ojmpst.Make (struct
-  type 'x t = 'x
+module Payload = struct
+  type payload = (string * bytes) list
+end
 
-  let return x = x
-  let bind x f = f x
-end)
+open Payload
+
+module Direct =
+  Ojmpst.Make
+    (Payload)
+    (struct
+      type 'x t = 'x
+
+      let return x = x
+      let bind x f = f x
+    end)
+
 open Ojmpst
 open Direct
 
