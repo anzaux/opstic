@@ -9,6 +9,18 @@ module type Monadic = sig
   val bind : 'x t -> ('x -> 'y t) -> 'y t
 end
 
+type role = string
+
+module type Endpoint = sig
+  type t
+  type _ io
+  type payload
+
+  val send : t -> string -> string * payload -> unit
+  val receive : t -> string -> (string * payload) io
+  val close : t -> unit
+end
+
 module Lin : sig
   type 'a t
 
@@ -29,18 +41,6 @@ end = struct
       x.lin_flag <- false;
       x.lin_val)
     else raise LinearityViolation
-end
-
-type role = string
-
-module type Endpoint = sig
-  type t
-  type _ io
-  type payload
-
-  val send : t -> string -> string * payload -> unit
-  val receive : t -> string -> (string * payload) io
-  val close : t -> unit
 end
 
 module Make (Io : Monadic) (Endpoint : Endpoint with type 'x io = 'x Io.t) =

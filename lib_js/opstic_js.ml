@@ -189,12 +189,13 @@ module Server = struct
     server.sessions <- List.update_assoc sessionid doit server.sessions
 end
 
-module ServerEndpoint : Opstic.Endpoint with type 'x io = 'x ServerIo.t = struct
-  type t = {
-    server : Server.t;
-    role_session : (string * string option) list;
-  }
+module ServerEndpoint : sig
+  include Opstic.Endpoint
 
+  val make : Server.t -> t
+end
+with type 'x io = 'x ServerIo.t = struct
+  type t = { server : Server.t; role_session : (string * string option) list }
   type 'x io = 'x ServerIo.t
   type nonrec payload = payload
 
@@ -213,6 +214,8 @@ module ServerEndpoint : Opstic.Endpoint with type 'x io = 'x ServerIo.t = struct
   let close _ =
     (* TODO purge all sessions from server *)
     ()
+
+  let make _ = assert false
 end
 
 module Mpst_js = Opstic.Make (ServerIo) (ServerEndpoint)
