@@ -18,7 +18,7 @@ end
 module Mpst = Opstic.Make (Payload) (ServerIo)
 open Payload
 
-type sessionid = Js_of_ocaml.Js.js_string
+type sessionid = string
 type request = string * payload
 type response = string * payload
 type reqid = int
@@ -35,20 +35,18 @@ type response_queue =
   | `Queued of response queue ]
 
 type session = {
-  lastaccess : float option;
   req_count : int;
   request_queue : request_queue;
   response_queue : response_queue;
 }
 
-type server = { mutable sessions : (sessionid * session) list }
-
 module Server = struct
-  let create_server : server = { sessions = [] }
+  type t = { mutable sessions : (sessionid * session) list }
+
+  let create_server () : t = { sessions = [] }
 
   let create_session () =
     {
-      lastaccess = None;
       req_count = 0;
       request_queue = `EmptyNoWait;
       response_queue = `EmptyNoWait;
@@ -122,7 +120,6 @@ module Server = struct
       in
       Some
         {
-          session with
           request_queue = inq;
           response_queue = outq;
           req_count = request_id + 1;
@@ -198,15 +195,27 @@ module Server = struct
     server.sessions <- List.update_assoc sessionid doit server.sessions
 end
 
-module ServerChannel = struct
-  let make_server_channel server sessionid =
-    Mpst.Endpoint.
-      {
-        send =
-          (fun msg ->
-            Server.mpst_send server ~sessionid msg;
-            Prr.Fut.ok ());
-        receive = (fun () -> Server.mpst_receive server ~sessionid);
-        close = (fun () -> ());
-      }
-end
+let make_raw_channel server ~sessionid =
+  Mpst.Endpoint.
+    {
+      send = (fun msg -> Server.mpst_send server ~sessionid msg);
+      receive = (fun () -> Server.mpst_receive server ~sessionid);
+      close = (fun () -> ());
+    }
+
+let fresh_session_id () =
+  (* FIXME *)
+  Int64.to_string (Random.bits64 ())
+
+(*
+   let make_raw_endpoint (servers : string list) : Mpst.Endpoint.raw_endpoint =
+     let sessionid = fresh_session_id () in
+     List.fold_left
+       (fun ep role ->
+         Hashtbl.add ep role (make_raw_channel (Server.create_server ()) ~sessionid);
+         ep)
+       (Hashtbl.create 42) servers
+
+   let make_endpoint (servers : string list) wit : _ Mpst.Endpoint.t =
+     let ep_raw = make_raw_endpoint servers in
+     Mpst.Endpoint.{ ep_raw; ep_witness = Opstic.Lin.create wit } *)

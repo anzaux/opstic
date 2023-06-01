@@ -36,7 +36,7 @@ module Make (P : Payload) (Io : Monadic) = struct
 
   module Endpoint = struct
     type raw_channel = {
-      send : string * payload -> unit Io.t;
+      send : string * payload -> unit;
       receive : unit -> (string * payload) Io.t;
       close : unit -> unit;
     }
@@ -94,10 +94,8 @@ module Make (P : Payload) (Io : Monadic) = struct
      fun ep call (*fun x -> x#a#lab*) v ->
       let out : ('v, 'b) out = call (Lin.get ep.ep_witness) in
       let raw_ch = Hashtbl.find ep.ep_raw out.out_role in
-      Io.bind
-        (raw_ch.send (out.out_label, out.out_marshal v))
-        (fun () ->
-          Io.return { ep with ep_witness = Lin.create out.out_next_wit })
+      raw_ch.send (out.out_label, out.out_marshal v);
+      Io.return { ep with ep_witness = Lin.create out.out_next_wit }
 
     let receive : type a. a ep -> (a -> ([> ] as 'b) inp) -> 'b Io.t =
      fun ep call (*fun x -> x#a*) ->
@@ -118,7 +116,7 @@ module Make (P : Payload) (Io : Monadic) = struct
   module type CHAN = sig
     type t
 
-    val send : t -> string * payload -> unit Io.t
+    val send : t -> string * payload -> unit
     val receive : t -> (string * payload) Io.t
     val create : unit -> t
   end
@@ -169,4 +167,101 @@ module Make (P : Payload) (Io : Monadic) = struct
       create_all roles;
       roles |> List.map (fun r -> (r, Hashtbl.find all_tables r))
   end
+end
+
+module type Marshal = sig
+  type payload
+
+  val to_dyn : 'a -> payload
+  val from_dyn : payload -> 'a
+end
+
+module Sample0
+    (P : Payload)
+    (Io : Monadic)
+    (Marshal : Marshal with type payload = P.payload) =
+struct
+  module Mpst = Make (P) (Io)
+  open P
+  open Mpst
+
+  let sample1 () =
+    let wit_a =
+      let open Witness in
+      object
+        method b =
+          Witness.make_inp ~role:"b"
+            [
+              ( "lab",
+                Choice
+                  {
+                    choice_label = "lab";
+                    choice_variant = { make_var = (fun x -> `lab x) };
+                    choice_next_wit =
+                      object
+                        method b =
+                          object
+                            method lab2 =
+                              {
+                                out_role = "b";
+                                out_label = "lab2";
+                                out_marshal = Marshal.to_dyn;
+                                out_next_wit = ();
+                              }
+
+                            method lab3 =
+                              {
+                                out_role = "b";
+                                out_label = "lab3";
+                                out_marshal = Marshal.to_dyn;
+                                out_next_wit = ();
+                              }
+                          end
+                      end;
+                    choice_marshal = Marshal.from_dyn;
+                  } );
+            ]
+      end
+    and wit_b =
+      let open Witness in
+      object
+        method a =
+          object
+            method lab =
+              {
+                out_role = "a";
+                out_label = "lab";
+                out_marshal = (Marshal.to_dyn : int -> payload);
+                out_next_wit =
+                  object
+                    method a =
+                      Witness.make_inp ~role:"a"
+                        [
+                          ( "lab2",
+                            Choice
+                              {
+                                choice_label = "lab2";
+                                choice_variant =
+                                  { make_var = (fun x -> `lab2 x) };
+                                choice_next_wit = ();
+                                choice_marshal =
+                                  (Marshal.from_dyn : payload -> unit);
+                              } );
+                          ( "lab3",
+                            Choice
+                              {
+                                choice_label = "lab3";
+                                choice_variant =
+                                  { make_var = (fun x -> `lab3 x) };
+                                choice_next_wit = ();
+                                choice_marshal =
+                                  (Marshal.from_dyn : payload -> unit);
+                              } );
+                        ]
+                  end;
+              }
+          end
+      end
+    in
+    (wit_a, wit_b)
 end

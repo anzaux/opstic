@@ -1,28 +1,27 @@
+open Opstic
+
 module Payload = struct
   type payload = (string * bytes) list
 end
 
 open Payload
 
-module Direct =
-  Opstic.Make
-    (Payload)
-    (struct
-      type 'x t = 'x
+module Io = struct
+  type 'x t = 'x
 
-      let return x = x
-      let bind x f = f x
-    end)
+  let return x = x
+  let bind x f = f x
+end
 
-open Opstic
+module Direct = Opstic.Make (Payload) (Io)
 open Direct
 
 module MarshalPayload = struct
-  type t = payload
+  type payload = Payload.payload
 
-  let to_dyn v : t = [ ("payload", Marshal.to_bytes v []) ]
+  let to_dyn v : payload = [ ("payload", Marshal.to_bytes v []) ]
 
-  let from_dyn = function
+  let from_dyn : payload -> 'a = function
     | [ ("payload", bytes) ] -> Marshal.from_bytes bytes 0
     | _ -> failwith "bad protocol"
 end
@@ -36,83 +35,11 @@ module SynchronousChannel = struct
 end
 
 module SimpleMpstChannel = SimpleMpstChannel_Make (SynchronousChannel)
+module Sample = Sample0 (Payload) (Io) (MarshalPayload)
 
 let test_make_witness_ab () =
-  let wit_a =
-    let open Witness in
-    object
-      method b =
-        Witness.make_inp ~role:"b"
-          [
-            ( "lab",
-              Choice
-                {
-                  choice_label = "lab";
-                  choice_variant = { make_var = (fun x -> `lab x) };
-                  choice_next_wit =
-                    object
-                      method b =
-                        object
-                          method lab2 =
-                            {
-                              out_role = "b";
-                              out_label = "lab2";
-                              out_marshal = MarshalPayload.to_dyn;
-                              out_next_wit = ();
-                            }
+  let wit_a, wit_b = Sample.sample1 () in
 
-                          method lab3 =
-                            {
-                              out_role = "b";
-                              out_label = "lab3";
-                              out_marshal = MarshalPayload.to_dyn;
-                              out_next_wit = ();
-                            }
-                        end
-                    end;
-                  choice_marshal = MarshalPayload.from_dyn;
-                } );
-          ]
-    end
-  and wit_b =
-    let open Witness in
-    object
-      method a =
-        object
-          method lab =
-            {
-              out_role = "a";
-              out_label = "lab";
-              out_marshal = (MarshalPayload.to_dyn : int -> payload);
-              out_next_wit =
-                object
-                  method a =
-                    Witness.make_inp ~role:"a"
-                      [
-                        ( "lab2",
-                          Choice
-                            {
-                              choice_label = "lab2";
-                              choice_variant = { make_var = (fun x -> `lab2 x) };
-                              choice_next_wit = ();
-                              choice_marshal =
-                                (MarshalPayload.from_dyn : payload -> unit);
-                            } );
-                        ( "lab3",
-                          Choice
-                            {
-                              choice_label = "lab3";
-                              choice_variant = { make_var = (fun x -> `lab3 x) };
-                              choice_next_wit = ();
-                              choice_marshal =
-                                (MarshalPayload.from_dyn : payload -> unit);
-                            } );
-                      ]
-                end;
-            }
-        end
-    end
-  in
   let raw_ep_a, raw_ep_b =
     let raw_endpoints = SimpleMpstChannel.make [ "a"; "b" ] in
     (List.assoc "a" raw_endpoints, List.assoc "b" raw_endpoints)
