@@ -56,7 +56,7 @@ module Server = struct
     in
     server.sessions <- List.update_assoc sessionid f' server.sessions
 
-  let process_post server sessionid (msg : string * payload) :
+  let process_request server sessionid (msg : string * payload) :
       (string * payload) Prr.Fut.or_error =
     (* The promise of the response *)
     let the_promise_for_response :
@@ -195,13 +195,18 @@ module ServerEndpoint : sig
   val make : Server.t -> t
 end
 with type 'x io = 'x ServerIo.t = struct
-  type t = { server : Server.t; role_session : (string * string option) list }
+  type t = {
+    server : Server.t;
+    global_sessionid : string;
+    role_sessionid : (string * string option) list;
+  }
+
   type 'x io = 'x ServerIo.t
   type nonrec payload = payload
 
   let send t role msg : unit =
     let sessionid =
-      match List.assoc role t.role_session with
+      match List.assoc role t.role_sessionid with
       | Some s -> s
       | None -> failwith "impossible: resopnse without request"
     in
