@@ -1,5 +1,5 @@
 (library
- (name Ojmpst_js)
- (public_name ojmpst.js)
- (libraries prr kxclib ojmpst)
+ (name Opstic_js)
+ (public_name opstic.js)
+ (libraries prr kxclib opstic)
  (preprocess (pps js_of_ocaml-ppx)))

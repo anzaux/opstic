@@ -1,5 +1,5 @@
 (executable
  (name main)
- (libraries ojmpst)
- (preprocess (pps ojmpst_ppx))
+ (libraries opstic)
+ (preprocess (pps opstic_ppx))
  )

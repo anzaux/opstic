@@ -15,7 +15,7 @@ module ServerIo : Monadic with type 'x t = 'x Prr.Fut.or_error = struct
     Prr.Fut.bind m @@ function Error e -> Prr.Fut.error e | Ok x -> af x
 end
 
-module Mpst = Ojmpst.Make (Payload) (ServerIo)
+module Mpst = Opstic.Make (Payload) (ServerIo)
 open Payload
 
 type sessionid = Js_of_ocaml.Js.js_string

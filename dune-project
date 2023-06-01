@@ -1,6 +1,6 @@
 (lang dune 3.6)
 
-(name ojmpst)
+(name opstic)
 
 (generate_opam_files true)
 
@@ -16,7 +16,7 @@
 (documentation https://url/to/documentation)
 
 (package
- (name ojmpst)
+ (name opstic)
  (synopsis "A short synopsis")
  (description "A longer description")
  (depends ocaml dune (ppxlib (>= :"0.19.0")) ppx_deriving (ounit :with-test) ppx_inline_test)

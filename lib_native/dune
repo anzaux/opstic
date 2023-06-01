@@ -1,6 +1,6 @@
 (library
- (name ojmpst_native)
- (public_name ojmpst.native)
+ (name opstic_native)
+ (public_name opstic.native)
  (inline_tests)
- (libraries ojmpst threads)
+ (libraries opstic threads)
  (preprocess (pps ppx_inline_test)))

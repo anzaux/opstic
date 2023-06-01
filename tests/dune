@@ -1,4 +1,4 @@
 (test
  (name test_direct)
  (modules test_direct)
- (libraries ojmpst oUnit))
+ (libraries opstic oUnit))

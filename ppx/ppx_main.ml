@@ -33,4 +33,4 @@ let rule_gtype_def =
 let () =
   Driver.register_transformation
     ~rules:[ rule_gtype_def; rule_gtype_expr ]
-    "ojmpst.ppx"
+    "opstic.ppx"

@@ -5,7 +5,7 @@ end
 open Payload
 
 module Direct =
-  Ojmpst.Make
+  Opstic.Make
     (Payload)
     (struct
       type 'x t = 'x
@@ -14,7 +14,7 @@ module Direct =
       let bind x f = f x
     end)
 
-open Ojmpst
+open Opstic
 open Direct
 
 module MarshalPayload = struct

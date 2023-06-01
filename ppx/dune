@@ -1,6 +1,6 @@
 (library
- (name ojmpst_ppx)
- (public_name ojmpst.ppx)
+ (name opstic_ppx)
+ (public_name opstic.ppx)
  (kind ppx_rewriter)
  (libraries ppxlib)
  (preprocess
