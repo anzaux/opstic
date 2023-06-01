@@ -1,9 +1,6 @@
 open! Kxclib
 
-module Payload = struct
-  type payload = Prr.Jv.t
-end
-
+type payload = Prr.Jv.t
 type 'a result_or_error = ('a, Prr.Jv.Error.t) result
 
 module ServerIo : Monadic with type 'x t = 'x Prr.Fut.or_error = struct
@@ -14,9 +11,6 @@ module ServerIo : Monadic with type 'x t = 'x Prr.Fut.or_error = struct
   let bind (m : _ t) (af : _ -> _ t) =
     Prr.Fut.bind m @@ function Error e -> Prr.Fut.error e | Ok x -> af x
 end
-
-module Mpst = Opstic.Make (Payload) (ServerIo)
-open Payload
 
 type sessionid = string
 type request = string * payload
@@ -195,27 +189,49 @@ module Server = struct
     server.sessions <- List.update_assoc sessionid doit server.sessions
 end
 
-let make_raw_channel server ~sessionid =
-  Mpst.Endpoint.
-    {
-      send = (fun msg -> Server.mpst_send server ~sessionid msg);
-      receive = (fun () -> Server.mpst_receive server ~sessionid);
-      close = (fun () -> ());
-    }
+module ServerEndpoint : Opstic.Endpoint with type 'x io = 'x ServerIo.t = struct
+  type t = {
+    server : Server.t;
+    role_session : (string * string option) list;
+  }
+
+  type 'x io = 'x ServerIo.t
+  type nonrec payload = payload
+
+  let send t role msg : unit =
+    let sessionid =
+      match List.assoc role t.role_session with
+      | Some s -> s
+      | None -> failwith "impossible: resopnse without request"
+    in
+    Server.mpst_send t.server ~sessionid msg
+
+  let receive _t _role =
+    (* TODO start a fresh session if no sessionid? *)
+    Prr.Fut.ok (assert false)
+
+  let close _ =
+    (* TODO purge all sessions from server *)
+    ()
+end
+
+module Mpst_js = Opstic.Make (ServerIo) (ServerEndpoint)
+
+(* let make_raw_channel server ~sessionid =
+   Mpst.Endpoint.
+     {
+       send = (fun msg -> Server.mpst_send server ~sessionid msg);
+       receive = (fun () -> Server.mpst_receive server ~sessionid);
+       close = (fun () -> ());
+     } *)
 
 let fresh_session_id () =
   (* FIXME *)
   Int64.to_string (Random.bits64 ())
 
-(*
-   let make_raw_endpoint (servers : string list) : Mpst.Endpoint.raw_endpoint =
-     let sessionid = fresh_session_id () in
-     List.fold_left
-       (fun ep role ->
-         Hashtbl.add ep role (make_raw_channel (Server.create_server ()) ~sessionid);
-         ep)
-       (Hashtbl.create 42) servers
+(* let make_raw_endpoint (servers : string list) : Mpst.Endpoint.raw_endpoint =
+   assert false *)
 
-   let make_endpoint (servers : string list) wit : _ Mpst.Endpoint.t =
-     let ep_raw = make_raw_endpoint servers in
-     Mpst.Endpoint.{ ep_raw; ep_witness = Opstic.Lin.create wit } *)
+(* let make_endpoint (servers : string list) wit : _ Mpst.Endpoint.t =
+   let ep_raw = make_raw_endpoint servers in
+   Mpst.Endpoint.{ ep_raw; ep_witness = Opstic.Lin.create wit } *)

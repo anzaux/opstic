@@ -1,10 +1,17 @@
-open Opstic
+type payload = (string * bytes) list
 
-module Payload = struct
-  type payload = (string * bytes) list
+module SynchronousChannel = struct
+  type t = (string * payload) Event.channel
+  type 'x io = 'x
+  type nonrec payload = payload
+
+  let create = Event.new_channel
+  let send ch v = Event.sync (Event.send ch v)
+  let receive ch = Event.sync (Event.receive ch)
+  let close _ = ()
 end
 
-open Payload
+module Endpoint = Opstic.LocalEndpoint (SynchronousChannel)
 
 module Io = struct
   type 'x t = 'x
@@ -13,11 +20,11 @@ module Io = struct
   let bind x f = f x
 end
 
-module Direct = Opstic.Make (Payload) (Io)
+module Direct = Opstic.Make (Io) (Endpoint)
 open Direct
 
 module MarshalPayload = struct
-  type payload = Payload.payload
+  type nonrec payload = payload
 
   let to_dyn v : payload = [ ("payload", Marshal.to_bytes v []) ]
 
@@ -26,26 +33,17 @@ module MarshalPayload = struct
     | _ -> failwith "bad protocol"
 end
 
-module SynchronousChannel = struct
-  type t = (string * payload) Event.channel
-
-  let send ch v = Event.sync (Event.send ch v)
-  let receive ch = Event.sync (Event.receive ch)
-  let create = Event.new_channel
-end
-
-module SimpleMpstChannel = SimpleMpstChannel_Make (SynchronousChannel)
-module Sample = Sample0 (Payload) (Io) (MarshalPayload)
+module Sample = Opstic.Sample0 (Io) (Endpoint) (MarshalPayload)
 
 let test_make_witness_ab () =
   let wit_a, wit_b = Sample.sample1 () in
 
   let raw_ep_a, raw_ep_b =
-    let raw_endpoints = SimpleMpstChannel.make [ "a"; "b" ] in
+    let raw_endpoints = Endpoint.make [ "a"; "b" ] in
     (List.assoc "a" raw_endpoints, List.assoc "b" raw_endpoints)
   in
-  ( Endpoint.{ ep_raw = raw_ep_a; ep_witness = Lin.create wit_a },
-    Endpoint.{ ep_raw = raw_ep_b; ep_witness = Lin.create wit_b } )
+  ( { ep_raw = raw_ep_a; ep_witness = Lin.create wit_a },
+    { ep_raw = raw_ep_b; ep_witness = Lin.create wit_b } )
 
 open Comm
 

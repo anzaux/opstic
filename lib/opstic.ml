@@ -31,22 +31,26 @@ end = struct
     else raise LinearityViolation
 end
 
-module Make (P : Payload) (Io : Monadic) = struct
-  open P
+type role = string
 
-  module Endpoint = struct
-    type raw_channel = {
-      send : string * payload -> unit;
-      receive : unit -> (string * payload) Io.t;
-      close : unit -> unit;
-    }
+module type Endpoint = sig
+  type t
+  type _ io
+  type payload
 
-    type role = string
-    type raw_endpoint = (role, raw_channel) Hashtbl.t
-    type 'a t = { ep_raw : raw_endpoint; ep_witness : 'a Lin.t }
+  val send : t -> string -> string * payload -> unit
+  val receive : t -> string -> (string * payload) io
+  val close : t -> unit
+end
 
-    let create raw wit = { ep_raw = raw; ep_witness = Lin.create wit }
-  end
+module Make (Io : Monadic) (Endpoint : Endpoint with type 'x io = 'x Io.t) =
+struct
+  type 'a t = { ep_raw : Endpoint.t; ep_witness : 'a Lin.t }
+  type payload = Endpoint.payload
+
+  let create raw wit = { ep_raw = raw; ep_witness = Lin.create wit }
+
+  module Lin = Lin
 
   module Witness = struct
     type ('m, 'x) variant = { make_var : 'x -> 'm (* 'x -> [> `lab of 'x] *) }
@@ -54,8 +58,8 @@ module Make (P : Payload) (Io : Monadic) = struct
     type 'm choice =
       | Choice : {
           choice_label : string;
-          choice_marshal : payload -> 'v;
-          choice_variant : ('m, 'v * 'b Endpoint.t) variant;
+          choice_marshal : Endpoint.payload -> 'v;
+          choice_variant : ('m, 'v * 'b t) variant;
           choice_next_wit : 'b;
         }
           -> 'm choice
@@ -80,7 +84,7 @@ module Make (P : Payload) (Io : Monadic) = struct
     type ('v, 'a) out = {
       out_role : string;
       out_label : string;
-      out_marshal : 'v -> payload;
+      out_marshal : 'v -> Endpoint.payload;
       out_next_wit : 'a;
     }
   end
@@ -88,20 +92,18 @@ module Make (P : Payload) (Io : Monadic) = struct
   module Comm = struct
     type 'm inp = 'm Witness.inp
     type ('v, 'a) out = ('v, 'a) Witness.out
-    type 'a ep = 'a Endpoint.t
+    type 'a ep = 'a t
 
     let send : 'a 'b. 'a ep -> ('a -> ('v, 'b) out) -> 'v -> 'b ep Io.t =
      fun ep call (*fun x -> x#a#lab*) v ->
       let out : ('v, 'b) out = call (Lin.get ep.ep_witness) in
-      let raw_ch = Hashtbl.find ep.ep_raw out.out_role in
-      raw_ch.send (out.out_label, out.out_marshal v);
+      Endpoint.send ep.ep_raw out.out_role (out.out_label, out.out_marshal v);
       Io.return { ep with ep_witness = Lin.create out.out_next_wit }
 
     let receive : type a. a ep -> (a -> ([> ] as 'b) inp) -> 'b Io.t =
      fun ep call (*fun x -> x#a*) ->
       let inp = call @@ Lin.get ep.ep_witness in
-      let raw_ch = Hashtbl.find ep.ep_raw inp.inp_role in
-      Io.bind (raw_ch.receive ()) (fun (label, v) ->
+      Io.bind (Endpoint.receive ep.ep_raw inp.inp_role) (fun (label, v) ->
           let (Choice c) = Hashtbl.find inp.inp_choices label in
           let v = c.choice_marshal v in
           Io.return
@@ -110,63 +112,88 @@ module Make (P : Payload) (Io : Monadic) = struct
 
     let close (ep : unit ep) =
       ignore @@ Lin.get ep.ep_witness;
-      Hashtbl.iter (fun _ ch -> ch.Endpoint.close ()) ep.ep_raw
+      Endpoint.close ep.ep_raw
   end
+end
 
-  module type CHAN = sig
-    type t
+module type Channel = sig
+  type t
+  type _ io
+  type payload
 
-    val send : t -> string * payload -> unit
-    val receive : t -> (string * payload) Io.t
-    val create : unit -> t
-  end
+  val create : unit -> t
+  val send : t -> string * payload -> unit
+  val receive : t -> (string * payload) io
+  val close : t -> unit
+end
 
-  module SimpleMpstChannel_Make (C : CHAN) = struct
-    let make (roles : string list) : (string * Endpoint.raw_endpoint) list =
-      let all_tables =
-        let t = Hashtbl.create (List.length roles - 1) in
-        roles
-        |> List.fold_left
-             (fun t r ->
-               Hashtbl.add t r (Hashtbl.create (List.length roles - 1));
-               t)
-             t
-      in
-      let rec create_bidirectional_channels (myname : string)
-          (theirnames : string list) =
-        match theirnames with
-        | [] -> ()
-        | othrname :: rest ->
-            let me2othr = C.create () in
-            let othr2me = C.create () in
-            let mychan : Endpoint.raw_channel =
-              {
-                send = C.send me2othr;
-                receive = (fun () -> C.receive othr2me);
-                close = ignore;
-              }
-            and othrchan : Endpoint.raw_channel =
-              {
-                send = C.send othr2me;
-                receive = (fun () -> C.receive me2othr);
-                close = ignore;
-              }
-            in
-            let mytbl = Hashtbl.find all_tables myname in
-            let othrtbl = Hashtbl.find all_tables othrname in
-            Hashtbl.add mytbl othrname mychan;
-            Hashtbl.add othrtbl myname othrchan;
-            create_bidirectional_channels myname rest
-      in
-      let rec create_all = function
-        | r :: rs ->
-            create_bidirectional_channels r rs;
-            create_all rs
-        | [] -> ()
-      in
-      create_all roles;
-      roles |> List.map (fun r -> (r, Hashtbl.find all_tables r))
-  end
+module LocalEndpoint (C : Channel) : sig
+  include Endpoint
+
+  val make : string list -> (string * t) list
+end
+with type 'x io = 'x C.io
+ and type payload = C.payload = struct
+  type payload = C.payload
+  type 'x io = 'x C.io
+
+  type raw_channel = {
+    raw_send : string * payload -> unit;
+    raw_receive : unit -> (string * payload) io;
+    raw_close : unit -> unit;
+  }
+
+  type t = { raw_channels : (string, raw_channel) Hashtbl.t }
+
+  let send t role msg = (Hashtbl.find t.raw_channels role).raw_send msg
+  let receive t role = (Hashtbl.find t.raw_channels role).raw_receive ()
+  let close t = Hashtbl.iter (fun _ ch -> ch.raw_close ()) t.raw_channels
+
+  let make (roles : string list) : (string * t) list =
+    let all_tables =
+      let t = Hashtbl.create (List.length roles - 1) in
+      roles
+      |> List.fold_left
+           (fun t r ->
+             Hashtbl.add t r (Hashtbl.create (List.length roles - 1));
+             t)
+           t
+    in
+    let rec create_bidirectional_channels (myname : string)
+        (theirnames : string list) =
+      match theirnames with
+      | [] -> ()
+      | othrname :: rest ->
+          let me2othr = C.create () in
+          let othr2me = C.create () in
+          let mychan : raw_channel =
+            {
+              raw_send = C.send me2othr;
+              raw_receive = (fun () -> C.receive othr2me);
+              raw_close = ignore;
+            }
+          and othrchan : raw_channel =
+            {
+              raw_send = C.send othr2me;
+              raw_receive = (fun () -> C.receive me2othr);
+              raw_close = ignore;
+            }
+          in
+          let mytbl = Hashtbl.find all_tables myname in
+          let othrtbl = Hashtbl.find all_tables othrname in
+          Hashtbl.add mytbl othrname mychan;
+          Hashtbl.add othrtbl myname othrchan;
+          create_bidirectional_channels myname rest
+    in
+    let rec create_all = function
+      | r :: rs ->
+          create_bidirectional_channels r rs;
+          create_all rs
+      | [] -> ()
+    in
+    create_all roles;
+    roles
+    |> List.map (fun r -> (r, { raw_channels = Hashtbl.find all_tables r }))
 end
 
 module type Marshal = sig
@@ -177,12 +204,11 @@ module type Marshal = sig
 end
 
 module Sample0
-    (P : Payload)
     (Io : Monadic)
-    (Marshal : Marshal with type payload = P.payload) =
+    (Endpoint : Endpoint with type 'x io = 'x Io.t)
+    (Marshal : Marshal with type payload = Endpoint.payload) =
 struct
-  module Mpst = Make (P) (Io)
-  open P
+  module Mpst = Make (Io) (Endpoint)
   open Mpst
 
   let sample1 () =
