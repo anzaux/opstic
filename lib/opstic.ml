@@ -9,7 +9,6 @@ module type Monadic = sig
   val bind : 'x t -> ('x -> 'y t) -> 'y t
 end
 
-type role = string
 type connection = Connected | Join | JoinCorrelation
 
 module type Endpoint = sig
@@ -68,7 +67,7 @@ module type S = sig
 
     type 'm choice =
       | Choice : {
-          choice_label : role;
+          choice_label : string;
           choice_marshal : payload -> 'v;
           choice_variant : ('m, 'v * 'b t) variant;
           choice_next_wit : 'b;
@@ -76,29 +75,29 @@ module type S = sig
           -> 'm choice
 
     type 'a inp = {
-      inp_role : role;
-      inp_choices : (role, 'a choice) Hashtbl.t;
+      inp_role : string;
+      inp_choices : (string, 'a choice) Hashtbl.t;
       inp_connection : connection;
     }
       constraint 'a = [> ]
 
     val make_inp :
-      role:role ->
+      role:string ->
       ?conn:connection ->
-      (role * ([> ] as 'a) choice) list ->
+      (string * ([> ] as 'a) choice) list ->
       'a inp
 
     type ('v, 'a) out = {
-      out_role : role;
-      out_label : role;
+      out_role : string;
+      out_label : string;
       out_marshal : 'v -> payload;
       out_next_wit : 'a;
       out_connection : connection;
     }
 
     val make_out :
-      role:role ->
-      label:role ->
+      role:string ->
+      label:string ->
       marshal:('a -> payload) ->
       ?conn:connection ->
       'b ->
