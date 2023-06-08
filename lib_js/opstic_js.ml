@@ -6,6 +6,10 @@ let failwith msg =
   Kxclib.Log0.error "Failure: %s" msg;
   failwith msg
 
+let mpst_error msg =
+  let open Prr in
+  Jv.Error.v ~name:(Jstr.v "MPSTError") (Jstr.v msg)
+
 module ServerIo : sig
   include Monadic with type 'x t = 'x Prr.Fut.or_error
 
@@ -15,6 +19,7 @@ module ServerIo : sig
   val create_promise : unit -> 'a t * (('a, error) result -> unit)
   val error : error -> 'a t
   val error_with : string -> 'a t
+  val handle_error : 'a t -> handler:(error -> 'a t) -> 'a t
 end = struct
   open Prr
 
@@ -32,8 +37,11 @@ end = struct
   let error err = Fut.error err
 
   let error_with msg =
-    let err = Jv.Error.v ~name:(Jstr.v "MPSTError") (Jstr.v msg) in
+    let err = mpst_error msg in
     error err
+
+  let handle_error m ~handler =
+    Fut.bind m (function Ok x -> return x | Error err -> handler err)
 end
 
 module ConversationId = Opstic.Id.Make ()
@@ -125,6 +133,7 @@ end = struct
   let return = ServerIo.return
   let error_with = ServerIo.error_with
   let ( let* ) = ServerIo.bind
+  let handle_error = ServerIo.handle_error
 
   let hash_find ~descr h k =
     match Hashtbl.find_opt h k with
@@ -157,7 +166,7 @@ end = struct
   type join_correlation_entrypoint_queue = conversation_id entrypoint_queue0
 
   type join_entrypoint = {
-    mutable join : join_entrypoint_queue option;
+    mutable join_fresh : join_entrypoint_queue option;
     join_correlation :
       (conversation_id, join_correlation_entrypoint_queue) Hashtbl.t option;
   }
@@ -232,7 +241,7 @@ end = struct
 
   let register_entrypoint (server : t) ~spec =
     let register role =
-      let join =
+      let join_fresh =
         if List.mem role spec.joining_roles then Some `EmptyNoWait else None
       in
       let join_correlation =
@@ -240,7 +249,7 @@ end = struct
           Some (Hashtbl.create 42)
         else None
       in
-      let join_entrypoints = { join; join_correlation } in
+      let join_entrypoints = { join_fresh; join_correlation } in
       Hashtbl.replace server.join_entrypoints (spec.entrypoint_id, role)
         join_entrypoints
     in
@@ -376,14 +385,15 @@ end = struct
   let update_fresh_join_queue server ~entrypoint_id ~role f =
     let* entrypoints = get_join_entrypoints server ~entrypoint_id ~role in
     let* queue =
-      option_get entrypoints.join
+      option_get entrypoints.join_fresh
         ~descr:
           (Format.asprintf
              "No joinable endpoint for entypoint_id: %a and role: %a"
              EntrypointId.pp entrypoint_id Role.pp role)
     in
-    let x = f queue ~update:(fun queue -> entrypoints.join <- Some queue) in
-    x
+    (* FIXME: execution flow is rather complex!! *)
+    let update queue = entrypoints.join_fresh <- Some queue in
+    f queue ~update
 
   let update_correlation_join_queue server ~entrypoint_id ~role ~conversation_id
       f =
@@ -397,12 +407,9 @@ end = struct
              EntrypointId.pp entrypoint_id Role.pp role)
     in
     let update q = Hashtbl.replace hash conversation_id q in
-    let x =
-      match Hashtbl.find_opt hash conversation_id with
-      | Some queue -> f queue ~update
-      | None -> f `EmptyNoWait ~update
-    in
-    x
+    match Hashtbl.find_opt hash conversation_id with
+    | Some queue -> f queue ~update
+    | None -> f `EmptyNoWait ~update
 
   let handle_entry server ~entrypoint_id ~entrypoint_kind ~request =
     match entrypoint_kind with
@@ -464,12 +471,19 @@ end = struct
         let queue = if Queue.is_empty q then `EmptyNoWait else `Queued q in
         (return new_conn, queue)
 
-  let accept_initial server ~entrypoint_id ~(kind : [ `AsLeader | `AsFollower ])
-      ~roles : (conversation_id * role * http_session_id) io =
+  (* let respond_error f = *)
+
+  let rec accept_initial server ~entrypoint_id
+      ~(kind : [ `AsLeader | `AsFollower ]) ~roles :
+      (conversation_id * role * http_session_id) io =
     let queue = Hashtbl.find server.initial_entrypoint entrypoint_id in
     let promise, queue = _mpst_accept queue in
     Hashtbl.replace server.initial_entrypoint entrypoint_id queue;
     let* newconn = promise in
+    handle_error ~handler:(fun err ->
+        newconn.http_response_waiting (Error err);
+        accept_initial server ~entrypoint_id ~kind ~roles (* XXX stack? *))
+    @@
     let role = newconn.incoming.incoming_role in
     let* () =
       if List.mem role roles then return ()
@@ -497,6 +511,7 @@ end = struct
         update_fresh_join_queue server ~entrypoint_id ~role
         @@ fun queue ~update ->
         let promise, queue = _mpst_accept queue in
+        (* FIXME we must respond to newconn.http_response_waiting *)
         update queue;
         let* newconn = promise in
         let* conversation_id', role', _http_session_id =
@@ -510,6 +525,7 @@ end = struct
           ~conversation_id
         @@ fun queue ~update ->
         let promise, queue = _mpst_accept queue in
+        (* FIXME we must respond to newconn.http_response_waiting *)
         update queue;
         let* newconn = promise in
         assert (newconn.incoming = conversation_id);
