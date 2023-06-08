@@ -53,9 +53,77 @@ end = struct
     else raise LinearityViolation
 end
 
-module Make (Io : Monadic) (Endpoint : Endpoint with type 'x io = 'x Io.t) =
-struct
+module type S = sig
+  type endpoint
+  type payload
+  type 'x io
+  type 'a t = { ep_raw : endpoint; ep_witness : 'a Lin.t }
+
+  val create : endpoint -> 'a -> 'a t
+
+  module Lin = Lin
+
+  module Witness : sig
+    type ('m, 'x) variant = { make_var : 'x -> 'm }
+
+    type 'm choice =
+      | Choice : {
+          choice_label : role;
+          choice_marshal : payload -> 'v;
+          choice_variant : ('m, 'v * 'b t) variant;
+          choice_next_wit : 'b;
+        }
+          -> 'm choice
+
+    type 'a inp = {
+      inp_role : role;
+      inp_choices : (role, 'a choice) Hashtbl.t;
+      inp_connection : connection;
+    }
+      constraint 'a = [> ]
+
+    val make_inp :
+      role:role ->
+      ?conn:connection ->
+      (role * ([> ] as 'a) choice) list ->
+      'a inp
+
+    type ('v, 'a) out = {
+      out_role : role;
+      out_label : role;
+      out_marshal : 'v -> payload;
+      out_next_wit : 'a;
+      out_connection : connection;
+    }
+
+    val make_out :
+      role:role ->
+      label:role ->
+      marshal:('a -> payload) ->
+      ?conn:connection ->
+      'b ->
+      ('a, 'b) out
+  end
+
+  module Comm : sig
+    type 'a inp = 'a Witness.inp constraint 'a = [> ]
+    type ('v, 'a) out = ('v, 'a) Witness.out
+    type 'a ep = 'a t
+
+    val send : 'a ep -> ('a -> ('v, 'b) out) -> 'v -> 'b ep
+    val receive : 'a ep -> ('a -> ([> ] as 'b) inp) -> 'b io
+    val close : unit ep -> unit
+  end
+end
+
+module Make (Io : Monadic) (Endpoint : Endpoint with type 'x io = 'x Io.t) :
+  S
+    with type 'x io = 'x Io.t
+     and type payload = Endpoint.payload
+     and type endpoint = Endpoint.t = struct
   type 'a t = { ep_raw : Endpoint.t; ep_witness : 'a Lin.t }
+  type 'x io = 'x Io.t
+  type endpoint = Endpoint.t
   type payload = Endpoint.payload
 
   let create raw wit = { ep_raw = raw; ep_witness = Lin.create wit }
@@ -68,7 +136,7 @@ struct
     type 'm choice =
       | Choice : {
           choice_label : string;
-          choice_marshal : Endpoint.payload -> 'v;
+          choice_marshal : payload -> 'v;
           choice_variant : ('m, 'v * 'b t) variant;
           choice_next_wit : 'b;
         }
@@ -96,7 +164,7 @@ struct
     type ('v, 'a) out = {
       out_role : string;
       out_label : string;
-      out_marshal : 'v -> Endpoint.payload;
+      out_marshal : 'v -> payload;
       out_next_wit : 'a;
       out_connection : connection;
     }
@@ -116,12 +184,12 @@ struct
     type ('v, 'a) out = ('v, 'a) Witness.out
     type 'a ep = 'a t
 
-    let send : 'a 'b. 'a ep -> ('a -> ('v, 'b) out) -> 'v -> 'b ep Io.t =
+    let send : 'a 'b. 'a ep -> ('a -> ('v, 'b) out) -> 'v -> 'b ep =
      fun ep call (*fun x -> x#a#lab*) v ->
       let out : ('v, 'b) out = call (Lin.get ep.ep_witness) in
       Endpoint.send ep.ep_raw ~connection:out.out_connection ~role:out.out_role
         ~label:out.out_label ~payload:(out.out_marshal v);
-      Io.return { ep with ep_witness = Lin.create out.out_next_wit }
+      { ep with ep_witness = Lin.create out.out_next_wit }
 
     let receive : type a. a ep -> (a -> ([> ] as 'b) inp) -> 'b Io.t =
      fun ep call (*fun x -> x#a*) ->
@@ -153,7 +221,7 @@ module type Channel = sig
 end
 
 module LocalEndpoint (C : Channel) : sig
-  include Endpoint
+  include Endpoint with type 'x io = 'x C.io and type payload = C.payload
 
   val make : string list -> (string * t) list
 end
@@ -245,7 +313,7 @@ struct
       let open Witness in
       object
         method b =
-          Witness.make_inp ~role:"b"
+          Witness.make_inp ~conn:Join ~role:"b"
             [
               ( "lab",
                 Choice
@@ -275,7 +343,7 @@ struct
         method a =
           object
             method lab =
-              Witness.make_out ~role:"a" ~label:"lab"
+              Witness.make_out ~conn:Join ~role:"a" ~label:"lab"
                 ~marshal:(Marshal.to_dyn : int -> payload)
                 (object
                    method a =
