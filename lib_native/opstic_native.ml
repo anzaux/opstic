@@ -11,8 +11,6 @@ module SynchronousChannel = struct
   let close _ = ()
 end
 
-module Endpoint = Opstic.LocalEndpoint (SynchronousChannel)
-
 module Io = struct
   type 'x t = 'x
 
@@ -20,6 +18,7 @@ module Io = struct
   let bind x f = f x
 end
 
+module Endpoint = Opstic.LocalEndpoint (Io) (SynchronousChannel)
 module Direct = Opstic.Make (Io) (Endpoint)
 open Direct
 

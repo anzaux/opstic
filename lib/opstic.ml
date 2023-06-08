@@ -22,7 +22,7 @@ module type Endpoint = sig
     role:string ->
     label:string ->
     payload:payload ->
-    unit
+    unit io
 
   val receive :
     t -> connection:connection -> role:string -> (string * payload) io
@@ -109,7 +109,7 @@ module type S = sig
     type ('v, 'a) out = ('v, 'a) Witness.out
     type 'a ep = 'a t
 
-    val send : 'a ep -> ('a -> ('v, 'b) out) -> 'v -> 'b ep
+    val send : 'a ep -> ('a -> ('v, 'b) out) -> 'v -> 'b ep io
     val receive : 'a ep -> ('a -> ([> ] as 'b) inp) -> 'b io
     val close : unit ep -> unit
   end
@@ -183,12 +183,14 @@ module Make (Io : Monadic) (Endpoint : Endpoint with type 'x io = 'x Io.t) :
     type ('v, 'a) out = ('v, 'a) Witness.out
     type 'a ep = 'a t
 
-    let send : 'a 'b. 'a ep -> ('a -> ('v, 'b) out) -> 'v -> 'b ep =
+    let send : 'a 'b. 'a ep -> ('a -> ('v, 'b) out) -> 'v -> 'b ep io =
      fun ep call (*fun x -> x#a#lab*) v ->
       let out : ('v, 'b) out = call (Lin.get ep.ep_witness) in
-      Endpoint.send ep.ep_raw ~connection:out.out_connection ~role:out.out_role
-        ~label:out.out_label ~payload:(out.out_marshal v);
-      { ep with ep_witness = Lin.create out.out_next_wit }
+      Io.bind
+        (Endpoint.send ep.ep_raw ~connection:out.out_connection
+           ~role:out.out_role ~label:out.out_label ~payload:(out.out_marshal v))
+        (fun () ->
+          Io.return { ep with ep_witness = Lin.create out.out_next_wit })
 
     let receive : type a. a ep -> (a -> ([> ] as 'b) inp) -> 'b Io.t =
      fun ep call (*fun x -> x#a*) ->
@@ -219,8 +221,8 @@ module type Channel = sig
   val close : t -> unit
 end
 
-module LocalEndpoint (C : Channel) : sig
-  include Endpoint with type 'x io = 'x C.io and type payload = C.payload
+module LocalEndpoint (Io : Monadic) (C : Channel with type 'x io = 'x Io.t) : sig
+  include Endpoint with type 'x io = 'x Io.t and type payload = C.payload
 
   val make : string list -> (string * t) list
 end
@@ -238,7 +240,8 @@ with type 'x io = 'x C.io
   type t = { raw_channels : (string, raw_channel) Hashtbl.t }
 
   let send t ~connection:_ ~role ~label ~payload =
-    (Hashtbl.find t.raw_channels role).raw_send (label, payload)
+    (Hashtbl.find t.raw_channels role).raw_send (label, payload);
+    Io.return ()
 
   let receive t ~connection:_ ~role =
     (Hashtbl.find t.raw_channels role).raw_receive ()

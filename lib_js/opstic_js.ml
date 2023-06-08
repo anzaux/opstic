@@ -124,7 +124,7 @@ module Server : sig
     t -> http_session_id:http_session_id -> http_request io
 
   val send_to_client :
-    t -> http_session_id:http_session_id -> http_response -> unit
+    t -> http_session_id:http_session_id -> http_response -> unit io
 end = struct
   type 'a io = 'a ServerIo.t
   type http_request = payload
@@ -142,8 +142,6 @@ end = struct
 
   let option_get ~descr opt =
     match opt with Some x -> return x | None -> error_with descr
-
-  let safe_call f = try f () with exn -> error_with (Printexc.to_string exn)
 
   type 'ident new_connection = {
     incoming : 'ident;
@@ -296,8 +294,6 @@ end = struct
         in
         update queue;
         let promise, resp_resolv_f = ServerIo.create_promise () in
-        (* TODO exception handling *)
-        safe_call @@ fun () ->
         resolv_f
           (Ok
              {
@@ -571,12 +567,11 @@ end = struct
       { session with request_queue = inq };
     promise
 
-  let send_to_client server ~http_session_id (msg : http_response) : unit =
-    let session =
-      try Hashtbl.find server.established_sessions http_session_id
+  let send_to_client server ~http_session_id (msg : http_response) : unit io =
+    let* session =
+      try return @@ Hashtbl.find server.established_sessions http_session_id
       with Not_found ->
-        (* TODO raise exception *)
-        failwith
+        error_with
           (Format.asprintf "send_to_client: http session id not found: %a"
              SessionId.pp http_session_id)
     in
@@ -592,12 +587,12 @@ end = struct
             | Some x -> x
           in
           (* send back the response to the client *)
-          (* TODO exception handling *)
           f (Ok msg);
           if Queue.is_empty q then `EmptyNoWait else `EmptyWaiting q
     in
     Hashtbl.replace server.established_sessions http_session_id
-      { session with response_queue = outq }
+      { session with response_queue = outq };
+    return ()
 end
 
 let handle_request (server : Server.t) (request : Json.jv) : Json.jv ServerIo.t
@@ -648,13 +643,11 @@ type nonrec t = {
 }
 [@@warning "-69"]
 
-module ServerEndpoint
-    (* :
-       Opstic.Endpoint
-         with type t = t
-          and type 'x io = 'x ServerIo.t
-          and type payload = payload *) =
-struct
+module ServerEndpoint :
+  Opstic.Endpoint
+    with type t = t
+     and type 'x io = 'x ServerIo.t
+     and type payload = payload = struct
   type 'x io = 'x ServerIo.t
 
   type nonrec t = t = {
@@ -672,25 +665,21 @@ struct
 
   type nonrec payload = payload
 
-  let get_session_id_ ~ctx t role =
+  let get_session_id ~ctx t role =
     match Hashtbl.find t.role_http_session_id role with
-    | Some s -> s
+    | Some s -> return s
     | None ->
-        failwith
+        error_with
           (Format.asprintf "%s: Session is not established for role: %a" ctx
              Role.pp role)
     | exception Not_found ->
-        failwith
+        error_with
           (Format.asprintf "%s: impossible: No such role: %a" ctx Role.pp role)
 
-  let get_session_id ~ctx t role =
-    try return @@ get_session_id_ ~ctx t role
-    with Failure msg -> error_with msg
-
-  let send t ~connection ~role ~label ~payload : unit =
+  let send t ~connection ~role ~label ~payload : unit io =
     assert (connection = Opstic.Connected);
     let role = Role.create role in
-    let http_session_id = get_session_id_ t role ~ctx:"send" in
+    let* http_session_id = get_session_id t role ~ctx:"send" in
     let msg : Json.jv = `obj [ ("label", `str label); ("payload", payload) ] in
     Server.send_to_client t.server_ref ~http_session_id msg
 
