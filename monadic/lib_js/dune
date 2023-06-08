@@ -1,7 +1,7 @@
 (library
- (name Opstic_js)
- (public_name opstic.js)
- (libraries prr kxclib kxclib.jsoo opstic)
+ (name opstic_monadic_js)
+ (public_name opstic.monadic.js)
+ (libraries prr kxclib kxclib.jsoo opstic_monadic)
  (preprocess
   (pps
    js_of_ocaml-ppx

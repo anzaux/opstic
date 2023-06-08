@@ -18,8 +18,8 @@ module Io = struct
   let bind x f = f x
 end
 
-module Endpoint = Opstic.LocalEndpoint (Io) (SynchronousChannel)
-module Direct = Opstic.Make (Io) (Endpoint)
+module Endpoint = Opstic_monadic.LocalEndpoint (Io) (SynchronousChannel)
+module Direct = Opstic_monadic.Make (Io) (Endpoint)
 open Direct
 
 module MarshalPayload = struct
@@ -32,7 +32,7 @@ module MarshalPayload = struct
     | _ -> failwith "bad protocol"
 end
 
-module Sample = Opstic.Sample0 (Io) (Endpoint) (MarshalPayload)
+module Sample = Opstic_monadic.Sample0 (Io) (Endpoint) (MarshalPayload)
 
 let test_make_witness_ab () =
   let wit_a, wit_b = Sample.sample1 () in

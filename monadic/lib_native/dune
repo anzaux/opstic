@@ -1,6 +1,6 @@
 (library
  (name opstic_native)
- (public_name opstic.native)
+ (public_name opstic.monadic.native)
  (inline_tests)
- (libraries opstic threads)
+ (libraries opstic_monadic threads)
  (preprocess (pps ppx_inline_test)))

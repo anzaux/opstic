@@ -44,10 +44,10 @@ end = struct
     Fut.bind m (function Ok x -> return x | Error err -> handler err)
 end
 
-module ConversationId = Opstic.Id.Make ()
-module SessionId = Opstic.Id.Make ()
-module EntrypointId = Opstic.Id.Make ()
-module Role = Opstic.Id.Make ()
+module ConversationId = Opstic_monadic.Id.Make ()
+module SessionId = Opstic_monadic.Id.Make ()
+module EntrypointId = Opstic_monadic.Id.Make ()
+module Role = Opstic_monadic.Id.Make ()
 
 type http_session_id = SessionId.t [@@deriving show]
 type conversation_id = ConversationId.t [@@deriving show]
@@ -644,7 +644,7 @@ type nonrec t = {
 [@@warning "-69"]
 
 module ServerEndpoint :
-  Opstic.Endpoint
+  Opstic_monadic.Endpoint
     with type t = t
      and type 'x io = 'x ServerIo.t
      and type payload = payload = struct
@@ -677,13 +677,13 @@ module ServerEndpoint :
           (Format.asprintf "%s: impossible: No such role: %a" ctx Role.pp role)
 
   let send t ~connection ~role ~label ~payload : unit io =
-    assert (connection = Opstic.Connected);
+    assert (connection = Opstic_monadic.Connected);
     let role = Role.create role in
     let* http_session_id = get_session_id t role ~ctx:"send" in
     let msg : Json.jv = `obj [ ("label", `str label); ("payload", payload) ] in
     Server.send_to_client t.server_ref ~http_session_id msg
 
-  let receive t ~(connection : Opstic.connection) ~role =
+  let receive t ~(connection : Opstic_monadic.connection) ~role =
     let role = Role.create role in
     let* payload =
       match connection with
@@ -711,7 +711,7 @@ module Mpst_js = struct
 
   let ( let* ) = ServerIo.bind
 
-  module Mpst_js = Opstic.Make (ServerIo) (ServerEndpoint)
+  module Mpst_js = Opstic_monadic.Make (ServerIo) (ServerEndpoint)
 
   let accept_start_session :
       (* FIXME bad API style *)
@@ -756,7 +756,7 @@ module Mpst_js = struct
         return
           (c.choice_variant.make_var (*fun x -> `lab x*)
              ( v,
-               { ep_raw = t; ep_witness = Opstic.Lin.create c.choice_next_wit }
+               { ep_raw = t; ep_witness = Opstic_monadic.Lin.create c.choice_next_wit }
              ))
     | _ -> error_with (Format.asprintf "bad payload: %a" Json.pp_lit payload)
 
