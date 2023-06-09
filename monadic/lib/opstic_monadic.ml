@@ -361,5 +361,3 @@ struct
     in
     (wit_a, wit_b)
 end
-
-module Id = Id

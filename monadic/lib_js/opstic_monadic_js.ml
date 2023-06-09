@@ -3,10 +3,10 @@ open! Opstic_util_js
 
 type payload = Json.jv
 
-module ConversationId = Opstic_monadic.Id.Make ()
-module SessionId = Opstic_monadic.Id.Make ()
-module EntrypointId = Opstic_monadic.Id.Make ()
-module Role = Opstic_monadic.Id.Make ()
+module ConversationId = Opstic.Id.Make ()
+module SessionId = Opstic.Id.Make ()
+module EntrypointId = Opstic.Id.Make ()
+module Role = Opstic.Id.Make ()
 
 type http_session_id = SessionId.t [@@deriving show]
 type conversation_id = ConversationId.t [@@deriving show]
