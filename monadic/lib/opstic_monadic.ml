@@ -324,28 +324,30 @@ struct
   let sample1 () =
     let wit_a =
       let open Witness in
-      Witness.make_inp ~conn:Join
-        [
-          InpChoice
-            {
-              inp_choice_role = b;
-              inp_choice_label = lab;
-              inp_choice_next_wit =
-                object
-                  method b =
-                    object
-                      method lab2 =
-                        Witness.make_out ~role:"b" ~label:"lab2"
-                          ~marshal:Marshal.to_dyn ()
+      (Witness.make_inp ~conn:Join
+         [
+           InpChoice
+             {
+               inp_choice_role = b;
+               inp_choice_label = lab;
+               inp_choice_next_wit =
+                 object
+                   method b =
+                     object
+                       method lab2 =
+                         Witness.make_out ~role:"b" ~label:"lab2"
+                           ~marshal:Marshal.to_dyn ()
 
-                      method lab3 =
-                        Witness.make_out ~role:"b" ~label:"lab3"
-                          ~marshal:Marshal.to_dyn ()
-                    end
-                end;
-              inp_choice_marshal = Marshal.from_dyn;
-            };
-        ]
+                       method lab3 =
+                         Witness.make_out ~role:"b" ~label:"lab3"
+                           ~marshal:Marshal.to_dyn ()
+                     end
+                 end;
+               inp_choice_marshal = Marshal.from_dyn;
+             };
+         ]
+        : [< `b of _ ] inp)
+      (* NB this type annotation is mandatory for session-type safety *)
     and wit_b =
       let open Witness in
       object
@@ -358,7 +360,7 @@ struct
                    [
                      InpChoice
                        {
-                         inp_choice_role = a;
+                         inp_choice_role = (a : ([< `a of _ ], _) Rows.constr);
                          inp_choice_label = lab2;
                          inp_choice_next_wit = ();
                          inp_choice_marshal =
@@ -366,13 +368,14 @@ struct
                        };
                      InpChoice
                        {
-                         inp_choice_role = a;
+                         inp_choice_role = (a : ([< `a of _ ], _) Rows.constr);
                          inp_choice_label = lab3;
                          inp_choice_next_wit = ();
                          inp_choice_marshal =
                            (Marshal.from_dyn : payload -> unit);
                        };
-                   ])
+                   ]
+                  : [< `a of _ ] inp)
           end
       end
     in
