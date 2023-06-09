@@ -143,40 +143,6 @@ end = struct
   let option_get ~descr opt =
     match opt with Some x -> return x | None -> error_with descr
 
-  type 'ident new_connection = {
-    incoming : 'ident;
-    http_request : http_request;
-    http_response_waiting : http_response waiting;
-  }
-
-  type 'ident entrypoint_queue0 =
-    [ `EmptyNoWait
-    | `EmptyWaiting of 'ident new_connection waiting queue (* |q| > 0 *)
-    | `Queued of 'ident new_connection queue (* |q| > 0 *) ]
-
-  type incoming = {
-    incoming_role : role;
-    incoming_conversation_id : conversation_id option;
-  }
-
-  type initial_entrypoint_queue = incoming entrypoint_queue0
-  type join_entrypoint_queue = unit entrypoint_queue0
-  type join_correlation_entrypoint_queue = conversation_id entrypoint_queue0
-
-  type join_entrypoint = {
-    mutable join_fresh : join_entrypoint_queue option;
-    join_correlation :
-      (conversation_id, join_correlation_entrypoint_queue) Hashtbl.t option;
-  }
-
-  type entrypoint_kind =
-    | StartLeader of role
-    | StartFollower of role * conversation_id
-    | Join of role
-    | JoinCorrelation of role * conversation_id
-    | InSession of http_session_id
-  [@@deriving show]
-
   type reqid = int
 
   type request_queue =
@@ -187,7 +153,7 @@ end = struct
   type response_queue =
     [ `EmptyNoWait
     | `EmptyWaiting of (reqid * http_response waiting) queue (* |q| > 0 *)
-    | `Queued of http_response queue ]
+    | `Queued of http_response queue (* |q| > 0 *) ]
 
   type http_session = {
     http_session_id : http_session_id;
@@ -199,16 +165,40 @@ end = struct
   }
   [@@warning "-69"]
 
+  type 'ident new_connection = {
+    incoming : 'ident;
+    http_request : http_request;
+    http_response_waiting : http_response waiting;
+  }
+
+  type 'ident connection_queue0 =
+    [ `EmptyNoWait
+    | `EmptyWaiting of 'ident new_connection waiting queue (* |q| > 0 *)
+    | `Queued of 'ident new_connection queue (* |q| > 0 *) ]
+
+  type incoming = {
+    incoming_role : role;
+    incoming_conversation_id : conversation_id option;
+  }
+
+  type initial_queue = incoming connection_queue0
+  type join_queue = unit connection_queue0
+
+  type join_queues = {
+    mutable join_fresh : join_queue option;
+    join_correlation : (conversation_id, join_queue) Hashtbl.t option;
+  }
+
   type t = {
-    initial_entrypoint : (entrypoint_id, initial_entrypoint_queue) Hashtbl.t;
-    join_entrypoints : (entrypoint_id * role, join_entrypoint) Hashtbl.t;
+    initial_queues : (entrypoint_id, initial_queue) Hashtbl.t;
+    join_queues : (entrypoint_id * role, join_queues) Hashtbl.t;
     established_sessions : (http_session_id, http_session) Hashtbl.t;
   }
 
   let create_server () : t =
     {
-      initial_entrypoint = Hashtbl.create 42;
-      join_entrypoints = Hashtbl.create 42;
+      initial_queues = Hashtbl.create 42;
+      join_queues = Hashtbl.create 42;
       established_sessions = Hashtbl.create 42;
     }
 
@@ -247,14 +237,185 @@ end = struct
           Some (Hashtbl.create 42)
         else None
       in
-      let join_entrypoints = { join_fresh; join_correlation } in
-      Hashtbl.replace server.join_entrypoints (spec.entrypoint_id, role)
-        join_entrypoints
+      let join_queues = { join_fresh; join_correlation } in
+      Hashtbl.replace server.join_queues (spec.entrypoint_id, role) join_queues
     in
     List.iter register spec.other_roles;
-    Hashtbl.replace server.initial_entrypoint spec.entrypoint_id `EmptyNoWait
+    Hashtbl.replace server.initial_queues spec.entrypoint_id `EmptyNoWait
 
-  let create_http_session ~conversation_id ~role ~(request_count : int)
+  type entrypoint_kind =
+    | StartLeader of role
+    | StartFollower of role * conversation_id
+    | Join of role
+    | JoinCorrelation of role * conversation_id
+    | InSession of http_session_id
+  [@@deriving show]
+
+  let _update_initial_queue server ~entrypoint_id f =
+    let* queue =
+      hash_find server.initial_queues entrypoint_id
+        ~descr:("no such initial entrypoint:" ^ EntrypointId.show entrypoint_id)
+    in
+    f queue ~update:(fun queue ->
+        Hashtbl.replace server.initial_queues entrypoint_id queue)
+
+  let _get_join_queues server ~entrypoint_id ~role =
+    hash_find server.join_queues (entrypoint_id, role)
+      ~descr:
+        (Format.asprintf "No joinable queue for entypoint_id: %a and role: %a"
+           EntrypointId.pp entrypoint_id Role.pp role)
+
+  let _update_fresh_join_queue server ~entrypoint_id ~role f =
+    let* join_queues = _get_join_queues server ~entrypoint_id ~role in
+    let* queue =
+      option_get join_queues.join_fresh
+        ~descr:
+          (Format.asprintf
+             "No joinable endpoint for entypoint_id: %a and role: %a"
+             EntrypointId.pp entrypoint_id Role.pp role)
+    in
+    f queue ~update:(fun queue -> join_queues.join_fresh <- Some queue)
+
+  let _update_correlation_join_queue server ~entrypoint_id ~role
+      ~conversation_id f =
+    let* join_queues = _get_join_queues server ~entrypoint_id ~role in
+    let* hash =
+      option_get join_queues.join_correlation
+        ~descr:
+          (Format.asprintf
+             "No correlation-joinable endpoint for entypoint_id: %a and role: \
+              %a"
+             EntrypointId.pp entrypoint_id Role.pp role)
+    in
+    let update newq = Hashtbl.replace hash conversation_id newq in
+    match Hashtbl.find_opt hash conversation_id with
+    | Some queue -> f queue ~update
+    | None -> f `EmptyNoWait ~update
+
+  module Core = struct
+    let handle_established_sessions server ~http_session_id
+        ~(request : http_request) : http_response io =
+      let* session =
+        hash_find
+          ~descr:("no such session:" ^ SessionId.show http_session_id)
+          server.established_sessions http_session_id
+      in
+      let request_id = session.request_count in
+      let inq =
+        (* Handle the request by either (1) enqueueing it or (2) delivering directly to the (MPST) process *)
+        match session.request_queue with
+        | `EmptyNoWait | `Queued _ ->
+            (* (1) The MPST process is not waiting for this http session yet. Prepare the incoming queue ... *)
+            let q =
+              match session.request_queue with
+              | `Queued q -> q
+              | _ -> Queue.empty
+            in
+            (* and enqueue the request in it *)
+            `Queued (Queue.push (request_id, request) q)
+        | `EmptyWaiting resolv_f ->
+            (* (2) The MPST process is waiting. Deliver it directly *)
+            resolv_f (Ok request);
+            `EmptyNoWait
+      in
+      let promise, outq =
+        (* Check the response queue and (1) make a promise if empty or (2) send back the message directly if some   *)
+        match session.response_queue with
+        | `EmptyNoWait | `EmptyWaiting _ ->
+            (* (1) The queue is empty. Prepare the queue for `resolve` functions *)
+            let q =
+              match session.response_queue with
+              | `EmptyWaiting q -> q
+              | _ -> Queue.empty
+            in
+            (* making a promise for response, and *)
+            let promise, resolv_f = ServerIo.create_promise () in
+            (* update the queue state by enqueuing the resolve function *)
+            (promise, `EmptyWaiting (Queue.push (request_id, resolv_f) q))
+        | `Queued q ->
+            (* (2) A message is available in the queue *)
+            let retmsg, q =
+              match Queue.pop q with
+              | Some p -> p
+              | None -> assert false (* |q| > 0 *)
+            in
+            (* make a resolved promsie *)
+            (* and update the queue state *)
+            let outq = if Queue.is_empty q then `EmptyNoWait else `Queued q in
+            (return retmsg, outq)
+      in
+      Hashtbl.replace server.established_sessions http_session_id
+        {
+          session with
+          request_queue = inq;
+          response_queue = outq;
+          request_count = request_id + 1;
+        };
+      promise
+
+    let handle_pending_connection (type a) ~(incoming : a)
+        ~(queue : a connection_queue0) ~(request : http_request) ~update :
+        http_response io =
+      let promise, resp_resolv_f = ServerIo.create_promise () in
+      let newconn =
+        {
+          incoming;
+          http_request = request;
+          http_response_waiting = resp_resolv_f;
+        }
+      in
+      match queue with
+      | `EmptyNoWait | `Queued _ ->
+          let q = match queue with `Queued q -> q | _ -> Queue.empty in
+          let q = Queue.push newconn q in
+          update (`Queued q);
+          promise
+      | `EmptyWaiting q ->
+          let conn_resolv_f, q =
+            match Queue.pop q with
+            | Some x -> x
+            | None -> assert false (* |q|>0 *)
+          in
+          let queue : a connection_queue0 =
+            if Queue.is_empty q then `EmptyNoWait else `EmptyWaiting q
+          in
+          update queue;
+          conn_resolv_f (Ok newconn);
+          promise
+
+    let handle_entry server ~entrypoint_id ~entrypoint_kind ~request =
+      match entrypoint_kind with
+      | InSession http_session_id ->
+          handle_established_sessions server ~http_session_id ~request
+      | StartLeader role ->
+          _update_initial_queue server ~entrypoint_id (fun queue ->
+              handle_pending_connection
+                ~incoming:
+                  { incoming_role = role; incoming_conversation_id = None }
+                ~queue ~request)
+      | StartFollower (role, conversation_id) ->
+          _update_initial_queue server ~entrypoint_id (fun queue ~update ->
+              handle_pending_connection
+                ~incoming:
+                  {
+                    incoming_role = role;
+                    incoming_conversation_id = Some conversation_id;
+                  }
+                ~queue ~request ~update)
+      | Join role ->
+          _update_fresh_join_queue server ~entrypoint_id ~role
+          @@ fun queue ~update ->
+          handle_pending_connection ~incoming:() ~queue ~request ~update
+      | JoinCorrelation (role, conversation_id) ->
+          _update_correlation_join_queue server ~entrypoint_id ~role
+            ~conversation_id
+          @@ fun queue ~update ->
+          handle_pending_connection ~incoming:() ~queue ~request ~update
+  end
+
+  let handle_entry = Core.handle_entry
+
+  let _create_http_session ~conversation_id ~role ~(request_count : int)
       ?(request_queue = `EmptyNoWait) ?(response_queue = `EmptyNoWait) () =
     {
       conversation_id;
@@ -265,181 +426,9 @@ end = struct
       http_session_id = SessionId.create (Int64.to_string @@ Random.bits64 ());
     }
 
-  let _handle_pending_request (type a) ~(incoming : a)
-      ~(queue : a entrypoint_queue0) ~(request : http_request) ~update :
-      http_response io =
-    match queue with
-    | `EmptyNoWait | `Queued _ ->
-        let q = match queue with `Queued q -> q | _ -> Queue.empty in
-        let promise, resolv_f = ServerIo.create_promise () in
-        let q =
-          Queue.push
-            {
-              incoming;
-              http_request = request;
-              http_response_waiting = resolv_f;
-            }
-            q
-        in
-        update (`Queued q);
-        promise
-    | `EmptyWaiting q ->
-        let resolv_f, q =
-          match Queue.pop q with
-          | Some x -> x
-          | None -> assert false (* |q|>0 *)
-        in
-        let queue : a entrypoint_queue0 =
-          if Queue.is_empty q then `EmptyNoWait else `EmptyWaiting q
-        in
-        update queue;
-        let promise, resp_resolv_f = ServerIo.create_promise () in
-        resolv_f
-          (Ok
-             {
-               incoming;
-               http_request = request;
-               http_response_waiting = resp_resolv_f;
-             });
-        promise
-
-  let handle_established_sessions server ~http_session_id
-      ~(request : http_request) : http_response io =
-    let* session =
-      hash_find
-        ~descr:("no such session:" ^ SessionId.show http_session_id)
-        server.established_sessions http_session_id
-    in
-    let request_id = session.request_count in
-    let inq =
-      (* Handle the request by either (1) enqueueing it or (2) delivering directly to the (MPST) process *)
-      match session.request_queue with
-      | `EmptyNoWait | `Queued _ ->
-          (* (1) The MPST process is not waiting. Prepare the incoming queue ... *)
-          let q =
-            match session.request_queue with `Queued q -> q | _ -> Queue.empty
-          in
-          (* and enqueue the request in it *)
-          `Queued (Queue.push (request_id, request) q)
-      | `EmptyWaiting f ->
-          (* (2) The MPST process is waiting. Deliver it directly *)
-          f (Ok request);
-          `EmptyNoWait
-    in
-    let promise, outq =
-      (* Check the response queue and (1) make a promise if empty or (2) send back the message directly if some   *)
-      match session.response_queue with
-      | `EmptyNoWait | `EmptyWaiting _ ->
-          (* (1) The queue is empty. Prepare the queue for `resolve` functions *)
-          let q =
-            match session.response_queue with
-            | `EmptyWaiting q -> q
-            | _ -> Queue.empty
-          in
-          (* making a promise for response, and *)
-          let promise, resolv_f = ServerIo.create_promise () in
-          (* update the queue state by enqueuing the resolve function *)
-          (promise, `EmptyWaiting (Queue.push (request_id, resolv_f) q))
-      | `Queued q ->
-          (* (2) A message is available in the queue *)
-          let retmsg, q =
-            match Queue.pop q with
-            | Some p -> p
-            | None -> assert false (* |q| > 0 *)
-          in
-          (* make a resolved promsie *)
-          (* and update the queue state *)
-          let outq = if Queue.is_empty q then `EmptyNoWait else `Queued q in
-          (return retmsg, outq)
-    in
-    Hashtbl.replace server.established_sessions http_session_id
-      {
-        session with
-        request_queue = inq;
-        response_queue = outq;
-        request_count = request_id + 1;
-      };
-    promise
-
-  let update_initial_queue server ~entrypoint_id f =
-    let* queue =
-      hash_find server.initial_entrypoint entrypoint_id
-        ~descr:("no such initial entrypoint:" ^ EntrypointId.show entrypoint_id)
-    in
-    let x =
-      f queue ~update:(fun queue ->
-          Hashtbl.replace server.initial_entrypoint entrypoint_id queue)
-    in
-    x
-
-  let get_join_entrypoints server ~entrypoint_id ~role =
-    hash_find server.join_entrypoints (entrypoint_id, role)
-      ~descr:
-        (Format.asprintf "No joinable queue for entypoint_id: %a and role: %a"
-           EntrypointId.pp entrypoint_id Role.pp role)
-
-  let update_fresh_join_queue server ~entrypoint_id ~role f =
-    let* entrypoints = get_join_entrypoints server ~entrypoint_id ~role in
-    let* queue =
-      option_get entrypoints.join_fresh
-        ~descr:
-          (Format.asprintf
-             "No joinable endpoint for entypoint_id: %a and role: %a"
-             EntrypointId.pp entrypoint_id Role.pp role)
-    in
-    (* FIXME: execution flow is rather complex!! *)
-    let update queue = entrypoints.join_fresh <- Some queue in
-    f queue ~update
-
-  let update_correlation_join_queue server ~entrypoint_id ~role ~conversation_id
-      f =
-    let* entrypoints = get_join_entrypoints server ~entrypoint_id ~role in
-    let* hash =
-      option_get entrypoints.join_correlation
-        ~descr:
-          (Format.asprintf
-             "No correlation-joinable endpoint for entypoint_id: %a and role: \
-              %a"
-             EntrypointId.pp entrypoint_id Role.pp role)
-    in
-    let update q = Hashtbl.replace hash conversation_id q in
-    match Hashtbl.find_opt hash conversation_id with
-    | Some queue -> f queue ~update
-    | None -> f `EmptyNoWait ~update
-
-  let handle_entry server ~entrypoint_id ~entrypoint_kind ~request =
-    match entrypoint_kind with
-    | InSession http_session_id ->
-        handle_established_sessions server ~http_session_id ~request
-    | StartLeader role ->
-        update_initial_queue server ~entrypoint_id (fun queue ->
-            _handle_pending_request
-              ~incoming:
-                { incoming_role = role; incoming_conversation_id = None }
-              ~queue ~request)
-    | StartFollower (role, conversation_id) ->
-        update_initial_queue server ~entrypoint_id (fun queue ~update ->
-            _handle_pending_request
-              ~incoming:
-                {
-                  incoming_role = role;
-                  incoming_conversation_id = Some conversation_id;
-                }
-              ~queue ~request ~update)
-    | Join role ->
-        update_fresh_join_queue server ~entrypoint_id ~role
-        @@ fun queue ~update ->
-        _handle_pending_request ~incoming:() ~queue ~request ~update
-    | JoinCorrelation (role, conversation_id) ->
-        update_correlation_join_queue server ~entrypoint_id ~role
-          ~conversation_id
-        @@ fun queue ~update ->
-        _handle_pending_request ~incoming:conversation_id ~queue ~request
-          ~update
-
   let _establish_new_session server ~conversation_id ~role new_conn =
     let newsession =
-      create_http_session ~conversation_id ~role
+      _create_http_session ~conversation_id ~role
         ~request_queue:
           (`Queued (Queue.push (0, new_conn.http_request) Queue.empty))
         ~response_queue:
@@ -449,9 +438,10 @@ end = struct
     in
     Hashtbl.replace server.established_sessions newsession.http_session_id
       newsession;
-    return (conversation_id, role, newsession.http_session_id)
+    (conversation_id, role, newsession.http_session_id)
 
-  let _mpst_accept queue =
+  let _mpst_accept (type a) (queue : a connection_queue0) :
+      a new_connection io * a connection_queue0 =
     match queue with
     | `EmptyNoWait | `EmptyWaiting _ ->
         let q = match queue with `EmptyWaiting q -> q | _ -> Queue.empty in
@@ -467,16 +457,15 @@ end = struct
         let queue = if Queue.is_empty q then `EmptyNoWait else `Queued q in
         (return new_conn, queue)
 
-  (* let respond_error f = *)
-
   let rec accept_initial server ~entrypoint_id
       ~(kind : [ `AsLeader | `AsFollower ]) ~roles :
       (conversation_id * role * http_session_id) io =
-    let queue = Hashtbl.find server.initial_entrypoint entrypoint_id in
+    _update_initial_queue server ~entrypoint_id @@ fun queue ~update ->
     let promise, queue = _mpst_accept queue in
-    Hashtbl.replace server.initial_entrypoint entrypoint_id queue;
+    update queue;
     let* newconn = promise in
     handle_error ~handler:(fun err ->
+        (* wait for next connection if error *)
         newconn.http_response_waiting (Error err);
         accept_initial server ~entrypoint_id ~kind ~roles (* XXX stack? *))
     @@
@@ -490,42 +479,51 @@ end = struct
         let new_conversation_id =
           ConversationId.create (Int64.to_string @@ Random.bits64 ())
         in
-        _establish_new_session server ~conversation_id:new_conversation_id
-          ~role:newconn.incoming.incoming_role newconn
+        return
+        @@ _establish_new_session server ~conversation_id:new_conversation_id
+             ~role:newconn.incoming.incoming_role newconn
     | `AsFollower ->
         let* conversation_id =
           option_get newconn.incoming.incoming_conversation_id
             ~descr:"No conversation_id given"
         in
-        _establish_new_session server ~role:newconn.incoming.incoming_role
-          ~conversation_id newconn
+        return
+        @@ _establish_new_session server ~role:newconn.incoming.incoming_role
+             ~conversation_id newconn
 
-  let accept_join server ~entrypoint_id ~role ~conversation_id
+  let rec accept_join server ~entrypoint_id ~role ~conversation_id
       ~(kind : [ `Fresh | `Correlation ]) : http_request io =
+    let retry_if_error newconn f =
+      handle_error
+        ~handler:(fun err ->
+          (* wait for next connection if error *)
+          newconn.http_response_waiting (Error err);
+          accept_join server ~entrypoint_id ~role ~conversation_id ~kind)
+        (f ())
+    in
     match kind with
     | `Fresh ->
-        update_fresh_join_queue server ~entrypoint_id ~role
+        _update_fresh_join_queue server ~entrypoint_id ~role
         @@ fun queue ~update ->
         let promise, queue = _mpst_accept queue in
-        (* FIXME we must respond to newconn.http_response_waiting *)
         update queue;
         let* newconn = promise in
-        let* conversation_id', role', _http_session_id =
+        retry_if_error newconn @@ fun () ->
+        let conversation_id', role', _http_session_id =
           _establish_new_session server ~conversation_id ~role newconn
         in
         assert (conversation_id = conversation_id');
         assert (role = role');
         return newconn.http_request
     | `Correlation ->
-        update_correlation_join_queue server ~entrypoint_id ~role
+        _update_correlation_join_queue server ~entrypoint_id ~role
           ~conversation_id
         @@ fun queue ~update ->
         let promise, queue = _mpst_accept queue in
-        (* FIXME we must respond to newconn.http_response_waiting *)
         update queue;
         let* newconn = promise in
-        assert (newconn.incoming = conversation_id);
-        let* conversation_id', role', _http_session_id =
+        retry_if_error newconn @@ fun () ->
+        let conversation_id', role', _http_session_id =
           _establish_new_session server ~conversation_id ~role newconn
         in
         assert (conversation_id = conversation_id');
@@ -756,8 +754,10 @@ module Mpst_js = struct
         return
           (c.choice_variant.make_var (*fun x -> `lab x*)
              ( v,
-               { ep_raw = t; ep_witness = Opstic_monadic.Lin.create c.choice_next_wit }
-             ))
+               {
+                 ep_raw = t;
+                 ep_witness = Opstic_monadic.Lin.create c.choice_next_wit;
+               } ))
     | _ -> error_with (Format.asprintf "bad payload: %a" Json.pp_lit payload)
 
   include Mpst_js
