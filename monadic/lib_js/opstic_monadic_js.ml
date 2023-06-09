@@ -677,13 +677,13 @@ module ServerEndpoint :
           (Format.asprintf "%s: impossible: No such role: %a" ctx Role.pp role)
 
   let send t ~connection ~role ~label ~payload : unit io =
-    assert (connection = Opstic_monadic.Connected);
+    assert (connection = Opstic.Connected);
     let role = Role.create role in
     let* http_session_id = get_session_id t role ~ctx:"send" in
     let msg : Json.jv = `obj [ ("label", `str label); ("payload", payload) ] in
     Server.send_to_client t.server_ref ~http_session_id msg
 
-  let receive t ~(connection : Opstic_monadic.connection) ~role =
+  let receive t ~(connection : Opstic.connection) ~role =
     let role = Role.create role in
     let* payload =
       match connection with

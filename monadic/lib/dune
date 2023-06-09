@@ -1,6 +1,7 @@
 (library
  (name opstic_monadic)
  (public_name opstic.monadic)
+ (libraries opstic)
  (preprocess
   (pps
    js_of_ocaml-ppx

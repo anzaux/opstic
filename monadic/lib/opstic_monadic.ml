@@ -1,11 +1,11 @@
+open Opstic
+
 module type Monadic = sig
   type _ t
 
   val return : 'x -> 'x t
   val bind : 'x t -> ('x -> 'y t) -> 'y t
 end
-
-type connection = Connected | Join | JoinCorrelation
 
 module type Endpoint = sig
   type t
@@ -59,8 +59,6 @@ module type S = sig
   module Lin = Lin
 
   module Witness : sig
-    type ('m, 'x) variant = { make_var : 'x -> 'm }
-
     type 'm choice =
       | Choice : {
           choice_label : string;
@@ -126,8 +124,6 @@ module Make (Io : Monadic) (Endpoint : Endpoint with type 'x io = 'x Io.t) :
   module Lin = Lin
 
   module Witness = struct
-    type ('m, 'x) variant = { make_var : 'x -> 'm (* 'x -> [> `lab of 'x] *) }
-
     type 'm choice =
       | Choice : {
           choice_label : string;
