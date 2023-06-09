@@ -1,7 +1,3 @@
-module type Payload = sig
-  type payload
-end
-
 module type Monadic = sig
   type _ t
 
