@@ -61,9 +61,8 @@ module type S = sig
   module Witness : sig
     type 'm choice =
       | Choice : {
-          choice_label : string;
+          choice_variant : ('m, 'v * 'b t) Rows.constr;
           choice_marshal : payload -> 'v;
-          choice_variant : ('m, 'v * 'b t) variant;
           choice_next_wit : 'b;
         }
           -> 'm choice
@@ -76,10 +75,7 @@ module type S = sig
       constraint 'a = [> ]
 
     val make_inp :
-      role:string ->
-      ?conn:connection ->
-      (string * ([> ] as 'a) choice) list ->
-      'a inp
+      role:string -> ?conn:connection -> ([> ] as 'a) choice list -> 'a inp
 
     type ('v, 'a) out = {
       out_role : string;
@@ -126,9 +122,8 @@ module Make (Io : Monadic) (Endpoint : Endpoint with type 'x io = 'x Io.t) :
   module Witness = struct
     type 'm choice =
       | Choice : {
-          choice_label : string;
+          choice_variant : ('m, 'v * 'b t) Rows.constr;
           choice_marshal : payload -> 'v;
-          choice_variant : ('m, 'v * 'b t) variant;
           choice_next_wit : 'b;
         }
           -> 'm choice
@@ -140,12 +135,11 @@ module Make (Io : Monadic) (Endpoint : Endpoint with type 'x io = 'x Io.t) :
     }
       constraint 'm = [> ]
 
-    let make_inp ~role ?(conn = Connected) (xs : (string * 'm choice) list) :
-        'm inp =
+    let make_inp ~role ?(conn = Connected) (xs : 'm choice list) : 'm inp =
       let tbl = Hashtbl.create (List.length xs) in
       let rec put_all = function
-        | (k, v) :: xs ->
-            Hashtbl.add tbl k v;
+        | (Choice c0 as c) :: xs ->
+            Hashtbl.add tbl c0.choice_variant.constr_name c;
             put_all xs
         | [] -> ()
       in
@@ -301,6 +295,11 @@ module Sample0
 struct
   module Mpst = Make (Io) (Endpoint)
   open Mpst
+  open Rows
+
+  [%%declare_constr lab]
+  [%%declare_constr lab2]
+  [%%declare_constr lab3]
 
   let sample1 () =
     let wit_a =
@@ -309,26 +308,24 @@ struct
         method b =
           Witness.make_inp ~conn:Join ~role:"b"
             [
-              ( "lab",
-                Choice
-                  {
-                    choice_label = "lab";
-                    choice_variant = { make_var = (fun x -> `lab x) };
-                    choice_next_wit =
-                      object
-                        method b =
-                          object
-                            method lab2 =
-                              Witness.make_out ~role:"b" ~label:"lab2"
-                                ~marshal:Marshal.to_dyn ()
+              Choice
+                {
+                  choice_variant = lab;
+                  choice_next_wit =
+                    object
+                      method b =
+                        object
+                          method lab2 =
+                            Witness.make_out ~role:"b" ~label:"lab2"
+                              ~marshal:Marshal.to_dyn ()
 
-                            method lab3 =
-                              Witness.make_out ~role:"b" ~label:"lab3"
-                                ~marshal:Marshal.to_dyn ()
-                          end
-                      end;
-                    choice_marshal = Marshal.from_dyn;
-                  } );
+                          method lab3 =
+                            Witness.make_out ~role:"b" ~label:"lab3"
+                              ~marshal:Marshal.to_dyn ()
+                        end
+                    end;
+                  choice_marshal = Marshal.from_dyn;
+                };
             ]
       end
     and wit_b =
@@ -343,26 +340,20 @@ struct
                    method a =
                      Witness.make_inp ~role:"a"
                        [
-                         ( "lab2",
-                           Choice
-                             {
-                               choice_label = "lab2";
-                               choice_variant =
-                                 { make_var = (fun x -> `lab2 x) };
-                               choice_next_wit = ();
-                               choice_marshal =
-                                 (Marshal.from_dyn : payload -> unit);
-                             } );
-                         ( "lab3",
-                           Choice
-                             {
-                               choice_label = "lab3";
-                               choice_variant =
-                                 { make_var = (fun x -> `lab3 x) };
-                               choice_next_wit = ();
-                               choice_marshal =
-                                 (Marshal.from_dyn : payload -> unit);
-                             } );
+                         Choice
+                           {
+                             choice_variant = lab2;
+                             choice_next_wit = ();
+                             choice_marshal =
+                               (Marshal.from_dyn : payload -> unit);
+                           };
+                         Choice
+                           {
+                             choice_variant = lab3;
+                             choice_next_wit = ();
+                             choice_marshal =
+                               (Marshal.from_dyn : payload -> unit);
+                           };
                        ]
                 end)
           end

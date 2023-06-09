@@ -1,9 +1,10 @@
 (library
  (name opstic_monadic)
  (public_name opstic.monadic)
- (libraries opstic)
+ (libraries opstic rows)
  (preprocess
   (pps
+   rows.ppx
    js_of_ocaml-ppx
    ppx_deriving.show
    ppx_deriving.eq
