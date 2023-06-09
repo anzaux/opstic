@@ -219,7 +219,7 @@ module Mpst = struct
       let request_queue = ConcurrentQueue.create ()
       and response_queue = ConcurrentQueue.create () in
       ConcurrentQueue.enqueue request_queue new_conn.http_request;
-      ConcurrentQueue.add_waitor response_queue new_conn.http_response_waiting;
+      ConcurrentQueue.add_waiter response_queue new_conn.http_response_waiting;
       _create_http_session ~conversation_id ~role ~request_queue ~response_queue
         ~request_count:1 ()
     in
