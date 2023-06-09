@@ -50,23 +50,28 @@ module ServerEndpoint :
     let msg : Json.jv = `obj [ ("label", `str label); ("payload", payload) ] in
     Server.Mpst.send_to_client t.server_ref ~http_session_id msg
 
-  let receive t ~(connection : Opstic.connection) ~role =
-    let role = Role.create role in
-    let* payload =
-      match connection with
-      | Connected ->
-          let* http_session_id = get_session_id t role ~ctx:"receive" in
-          Server.Mpst.receive_from_client t.server_ref ~http_session_id
-      | Join | JoinCorrelation ->
-          let kind = if connection = Join then `Fresh else `Correlation in
-          Server.Mpst.accept_join t.server_ref
-            ~entrypoint_id:t.protocol.entrypoint_id ~role
-            ~conversation_id:t.conversation_id ~kind
-    in
-    match payload |> (Jv.pump_field "payload" &> Jv.pump_field "label") with
-    | `obj [ ("label", `str label); ("payload", payload) ] ->
-        return (label, payload)
-    | _ -> error_with "bad payload"
+  let receive t ~(connection : Opstic.connection) ~roles =
+    match roles with
+    | [ role ] -> (
+        let role = Role.create role in
+        let* payload =
+          match connection with
+          | Connected ->
+              let* http_session_id = get_session_id t role ~ctx:"receive" in
+              Server.Mpst.receive_from_client t.server_ref ~http_session_id
+          | Join | JoinCorrelation ->
+              let kind = if connection = Join then `Fresh else `Correlation in
+              Server.Mpst.accept_join t.server_ref
+                ~entrypoint_id:t.protocol.entrypoint_id ~role
+                ~conversation_id:t.conversation_id ~kind
+        in
+        match payload |> (Jv.pump_field "payload" &> Jv.pump_field "label") with
+        | `obj [ ("label", `str label); ("payload", payload) ] ->
+            return (Role.to_string role, label, payload)
+        | _ -> error_with "bad payload")
+    | _ ->
+        error_with
+          "TODO: Opstic_monadic_js: can't wait for multiple roles for now"
 
   let close _ =
     (* TODO purge all sessions from server *)
@@ -84,10 +89,9 @@ module Mpst_js = struct
       (* FIXME bad API style *)
       Server.t ->
       spec:Server.protocol_spec ->
-      witness:'wit ->
-      ('wit -> ([> ] as 'b) Mpst_js.Comm.inp) ->
+      witness:'b Mpst_js.Comm.inp ->
       'b ServerIo.t =
-   fun server ~spec ~witness call ->
+   fun server ~spec ~witness ->
     let* conversation_id, role, http_session_id =
       Server.Mpst.accept_initial server ~entrypoint_id:spec.entrypoint_id
         ~kind:`AsLeader ~roles:spec.other_roles
@@ -105,7 +109,7 @@ module Mpst_js = struct
         role_http_session_id;
       }
     in
-    let inp = call witness in
+    let inp = witness in
     (* FIXME use Comm.receive instead *)
     let* payload = Server.Mpst.receive_from_client server ~http_session_id in
     let* payload =
@@ -118,15 +122,17 @@ module Mpst_js = struct
     in
     match payload |> (Jv.pump_field "payload" &> Jv.pump_field "label") with
     | `obj [ ("label", `str label); ("payload", v) ] ->
-        let (Choice c) = Hashtbl.find inp.inp_choices label in
-        let v = c.choice_marshal v in
+        let role_str = Role.to_string role in
+        let (InpChoice c) = Hashtbl.find inp.inp_choices (role_str, label) in
+        let v = c.inp_choice_marshal v in
         return
-          (c.choice_variant.make_var (*fun x -> `lab x*)
-             ( v,
-               {
-                 ep_raw = t;
-                 ep_witness = Opstic_monadic.Lin.create c.choice_next_wit;
-               } ))
+          (c.inp_choice_role.make_var
+          @@ c.inp_choice_label.make_var
+               ( v,
+                 {
+                   ep_raw = t;
+                   ep_witness = Opstic_monadic.Lin.create c.inp_choice_next_wit;
+                 } ))
     | _ -> error_with (Format.asprintf "bad payload: %a" Json.pp_lit payload)
 
   include Mpst_js

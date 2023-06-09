@@ -21,7 +21,10 @@ module type Endpoint = sig
     unit io
 
   val receive :
-    t -> connection:connection -> role:string -> (string * payload) io
+    t ->
+    connection:connection ->
+    roles:string list ->
+    (string * string * payload) io
 
   val close : t -> unit
 end
@@ -59,23 +62,23 @@ module type S = sig
   module Lin = Lin
 
   module Witness : sig
-    type 'm choice =
-      | Choice : {
-          choice_variant : ('m, 'v * 'b t) Rows.constr;
-          choice_marshal : payload -> 'v;
-          choice_next_wit : 'b;
+    type 'm inp_choice =
+      | InpChoice : {
+          inp_choice_role : ('m, 'l) Rows.constr;
+          inp_choice_label : ('l, 'v * 'b t) Rows.constr;
+          inp_choice_marshal : payload -> 'v;
+          inp_choice_next_wit : 'b;
         }
-          -> 'm choice
+          -> 'm inp_choice
 
     type 'a inp = {
-      inp_role : string;
-      inp_choices : (string, 'a choice) Hashtbl.t;
+      inp_roles : string list;
+      inp_choices : (string * string, 'a inp_choice) Hashtbl.t;
       inp_connection : connection;
     }
       constraint 'a = [> ]
 
-    val make_inp :
-      role:string -> ?conn:connection -> ([> ] as 'a) choice list -> 'a inp
+    val make_inp : ?conn:connection -> ([> ] as 'a) inp_choice list -> 'a inp
 
     type ('v, 'a) out = {
       out_role : string;
@@ -100,7 +103,7 @@ module type S = sig
     type 'a ep = 'a t
 
     val send : 'a ep -> ('a -> ('v, 'b) out) -> 'v -> 'b ep io
-    val receive : 'a ep -> ('a -> ([> ] as 'b) inp) -> 'b io
+    val receive : ([> ] as 'b) inp ep -> 'b io
     val close : unit ep -> unit
   end
 end
@@ -120,31 +123,37 @@ module Make (Io : Monadic) (Endpoint : Endpoint with type 'x io = 'x Io.t) :
   module Lin = Lin
 
   module Witness = struct
-    type 'm choice =
-      | Choice : {
-          choice_variant : ('m, 'v * 'b t) Rows.constr;
-          choice_marshal : payload -> 'v;
-          choice_next_wit : 'b;
+    type 'm inp_choice =
+      | InpChoice : {
+          inp_choice_role : ('m, 'l) Rows.constr;
+          inp_choice_label : ('l, 'v * 'b t) Rows.constr;
+          inp_choice_marshal : payload -> 'v;
+          inp_choice_next_wit : 'b;
         }
-          -> 'm choice
+          -> 'm inp_choice
 
-    type 'm inp = {
-      inp_role : string;
-      inp_choices : (string, 'm choice) Hashtbl.t;
+    type 'a inp = {
+      inp_roles : string list;
+      inp_choices : (string * string, 'a inp_choice) Hashtbl.t;
       inp_connection : connection;
     }
-      constraint 'm = [> ]
+      constraint 'a = [> ]
 
-    let make_inp ~role ?(conn = Connected) (xs : 'm choice list) : 'm inp =
+    let make_inp ?(conn = Connected) (xs : 'm inp_choice list) : 'm inp =
       let tbl = Hashtbl.create (List.length xs) in
       let rec put_all = function
-        | (Choice c0 as c) :: xs ->
-            Hashtbl.add tbl c0.choice_variant.constr_name c;
+        | (InpChoice c0 as c) :: xs ->
+            Hashtbl.add tbl
+              (c0.inp_choice_role.constr_name, c0.inp_choice_label.constr_name)
+              c;
             put_all xs
         | [] -> ()
       in
       put_all xs;
-      { inp_role = role; inp_connection = conn; inp_choices = tbl }
+      let roles =
+        xs |> List.map (fun (InpChoice c0) -> c0.inp_choice_role.constr_name)
+      in
+      { inp_roles = roles; inp_connection = conn; inp_choices = tbl }
 
     type ('v, 'a) out = {
       out_role : string;
@@ -178,17 +187,18 @@ module Make (Io : Monadic) (Endpoint : Endpoint with type 'x io = 'x Io.t) :
         (fun () ->
           Io.return { ep with ep_witness = Lin.create out.out_next_wit })
 
-    let receive : type a. a ep -> (a -> ([> ] as 'b) inp) -> 'b Io.t =
-     fun ep call (*fun x -> x#a*) ->
-      let inp = call @@ Lin.get ep.ep_witness in
+    let receive : 'a inp ep -> 'a Io.t =
+     fun ep ->
+      let inp = Lin.get ep.ep_witness in
       Io.bind
-        (Endpoint.receive ep.ep_raw ~role:inp.inp_role
-           ~connection:inp.inp_connection) (fun (label, v) ->
-          let (Choice c) = Hashtbl.find inp.inp_choices label in
-          let v = c.choice_marshal v in
+        (Endpoint.receive ep.ep_raw ~roles:inp.inp_roles
+           ~connection:inp.inp_connection) (fun (role, label, v) ->
+          let (InpChoice c) = Hashtbl.find inp.inp_choices (role, label) in
+          let v = c.inp_choice_marshal v in
           Io.return
-            (c.choice_variant.make_var (*fun x -> `lab x*)
-               (v, { ep with ep_witness = Lin.create c.choice_next_wit })))
+            (c.inp_choice_role.make_var
+               (c.inp_choice_label.make_var
+                  (v, { ep with ep_witness = Lin.create c.inp_choice_next_wit }))))
 
     let close (ep : unit ep) =
       ignore @@ Lin.get ep.ep_witness;
@@ -217,6 +227,8 @@ with type 'x io = 'x C.io
   type payload = C.payload
   type 'x io = 'x C.io
 
+  let ( let* ) = Io.bind
+
   type raw_channel = {
     raw_send : string * payload -> unit;
     raw_receive : unit -> (string * payload) io;
@@ -229,8 +241,14 @@ with type 'x io = 'x C.io
     (Hashtbl.find t.raw_channels role).raw_send (label, payload);
     Io.return ()
 
-  let receive t ~connection:_ ~role =
-    (Hashtbl.find t.raw_channels role).raw_receive ()
+  let receive t ~connection:_ ~roles =
+    match roles with
+    | [ role ] ->
+        let* label, value = (Hashtbl.find t.raw_channels role).raw_receive () in
+        Io.return (role, label, value)
+    | _ ->
+        failwith
+          "TODO: Opstic_monadic (native): Cannot wait for multirple roles"
 
   let close t = Hashtbl.iter (fun _ ch -> ch.raw_close ()) t.raw_channels
 
@@ -297,6 +315,8 @@ struct
   open Mpst
   open Rows
 
+  [%%declare_constr a]
+  [%%declare_constr b]
   [%%declare_constr lab]
   [%%declare_constr lab2]
   [%%declare_constr lab3]
@@ -304,30 +324,28 @@ struct
   let sample1 () =
     let wit_a =
       let open Witness in
-      object
-        method b =
-          Witness.make_inp ~conn:Join ~role:"b"
-            [
-              Choice
-                {
-                  choice_variant = lab;
-                  choice_next_wit =
+      Witness.make_inp ~conn:Join
+        [
+          InpChoice
+            {
+              inp_choice_role = b;
+              inp_choice_label = lab;
+              inp_choice_next_wit =
+                object
+                  method b =
                     object
-                      method b =
-                        object
-                          method lab2 =
-                            Witness.make_out ~role:"b" ~label:"lab2"
-                              ~marshal:Marshal.to_dyn ()
+                      method lab2 =
+                        Witness.make_out ~role:"b" ~label:"lab2"
+                          ~marshal:Marshal.to_dyn ()
 
-                          method lab3 =
-                            Witness.make_out ~role:"b" ~label:"lab3"
-                              ~marshal:Marshal.to_dyn ()
-                        end
-                    end;
-                  choice_marshal = Marshal.from_dyn;
-                };
-            ]
-      end
+                      method lab3 =
+                        Witness.make_out ~role:"b" ~label:"lab3"
+                          ~marshal:Marshal.to_dyn ()
+                    end
+                end;
+              inp_choice_marshal = Marshal.from_dyn;
+            };
+        ]
     and wit_b =
       let open Witness in
       object
@@ -336,26 +354,25 @@ struct
             method lab =
               Witness.make_out ~conn:Join ~role:"a" ~label:"lab"
                 ~marshal:(Marshal.to_dyn : int -> payload)
-                (object
-                   method a =
-                     Witness.make_inp ~role:"a"
-                       [
-                         Choice
-                           {
-                             choice_variant = lab2;
-                             choice_next_wit = ();
-                             choice_marshal =
-                               (Marshal.from_dyn : payload -> unit);
-                           };
-                         Choice
-                           {
-                             choice_variant = lab3;
-                             choice_next_wit = ();
-                             choice_marshal =
-                               (Marshal.from_dyn : payload -> unit);
-                           };
-                       ]
-                end)
+                (Witness.make_inp
+                   [
+                     InpChoice
+                       {
+                         inp_choice_role = a;
+                         inp_choice_label = lab2;
+                         inp_choice_next_wit = ();
+                         inp_choice_marshal =
+                           (Marshal.from_dyn : payload -> unit);
+                       };
+                     InpChoice
+                       {
+                         inp_choice_role = a;
+                         inp_choice_label = lab3;
+                         inp_choice_next_wit = ();
+                         inp_choice_marshal =
+                           (Marshal.from_dyn : payload -> unit);
+                       };
+                   ])
           end
       end
     in

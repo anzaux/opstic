@@ -54,7 +54,7 @@ let%test "test_comm" =
   let thread_a ep_a () =
     let ep = ep_a in
     debug "thread A: receiving";
-    let (`lab (_, ep)) = receive ep (fun x -> x#b) in
+    let (`b (`lab (_, ep))) = receive ep in
     debug "thread A: sending";
     if Random.bool () then close @@ send ep (fun x -> x#b#lab2) ()
     else close @@ send ep (fun x -> x#b#lab3) ()
@@ -64,11 +64,11 @@ let%test "test_comm" =
     debug "thread B: sending";
     let ep = send ep (fun x -> x#a#lab) 10 in
     debug "thread B: receiving";
-    match receive ep (fun x -> x#a) with
-    | `lab2 (_, ep) ->
+    match receive ep with
+    | `a (`lab2 (_, ep)) ->
         debug "thread B: received lab2";
         close ep
-    | `lab3 (_, ep) ->
+    | `a (`lab3 (_, ep)) ->
         debug "thread B: received lab3";
         close ep
   in
@@ -96,7 +96,7 @@ let%test "test_lin" =
   let ep_a, ep_b = test_make_witness_ab () in
   try
     let f ep = send ep (fun x -> x#a#lab) 123 in
-    ignore @@ Thread.create (fun () -> ignore @@ receive ep_a (fun x -> x#b)) ();
+    ignore @@ Thread.create (fun () -> ignore @@ receive ep_a) ();
     ignore @@ f ep_b;
     ignore @@ f ep_b;
     debug "linearity violation detection failure";
