@@ -1,6 +1,10 @@
-open! Opstic_util_js
+open! Kxclib
+module ServerIo = ServerIo
+module ConcurrentQueue = ConcurrentQueue
 
-type payload = Kxclib.Json.jv
+type 'a ok_or_error = ('a, ServerIo.error) result
+type 'a waiting = 'a ok_or_error -> unit
+type payload = Json.jv
 
 module ConversationId = Opstic.Id.Make ()
 module SessionId = Opstic.Id.Make ()
@@ -403,3 +407,42 @@ end = struct
       return ()
   end
 end
+
+let handle_request (server : Server.t) (request : Json.jv) : Json.jv ServerIo.t
+    =
+  let open ServerIo in
+  let ( let* ) = ServerIo.bind in
+  let ( let+ ) m f = ServerIo.map f m in
+  let access fld msg =
+    match Jv.access [ `f fld ] request with
+    | Some (`str x) -> return x
+    | _ -> error_with msg
+  in
+  let* entrypoint_id =
+    access "entrypoint" "entrypoint not given" |> map EntrypointId.create
+  in
+  let* role = access "role" "role not given" |> map Role.create in
+  let conversation_id () =
+    access "conversation_id" "conversation_id not given"
+    |> map ConversationId.create
+  in
+  let http_session_id () =
+    access "session_id" "session_id not given" |> map SessionId.create
+  in
+  let* mode_str = access "mode" "mode not given" in
+  let* entrypoint_kind =
+    match mode_str with
+    | "start" -> return (Server.StartLeader role)
+    | "start_follower" ->
+        let+ conversation_id = conversation_id () in
+        Server.StartFollower (role, conversation_id)
+    | "join" -> return (Server.Join role)
+    | "join_correlation" ->
+        let+ conversation_id = conversation_id () in
+        Server.JoinCorrelation (role, conversation_id)
+    | "session" ->
+        let+ http_session_id = http_session_id () in
+        Server.InSession http_session_id
+    | _ -> error_with (Format.asprintf "wrong mode: %s" mode_str)
+  in
+  Server.Handler.handle_entry server ~entrypoint_id ~entrypoint_kind ~request
