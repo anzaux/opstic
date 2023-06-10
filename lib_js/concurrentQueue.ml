@@ -19,14 +19,14 @@ type 'a t = 'a _t ref
 let return = ServerIo.return
 let create () = ref EmptyNotWaiting
 
-(* Dequeue a waiter. *)
-let rec dequeue_waiter (q : 'a maybe_waiting ref queue) =
+(* Dequeue a waiter if any. *)
+let rec pop_waiter (q : 'a maybe_waiting ref queue) =
   match Queue.pop q with
   | Some (({ contents = Some f } as r), q) ->
       (* Set it to None to prevent further call on the shared waiter *)
       r := None;
       Some (f, q)
-  | Some ({ contents = None }, q) -> dequeue_waiter q
+  | Some ({ contents = None }, q) -> pop_waiter q
   | None -> None
 
 let enqueue t value =
@@ -40,7 +40,7 @@ let enqueue t value =
         Queued (Queue.push value q)
     | EmptyWaiting q -> (
         (* (2) Someone is possibly waiting. *)
-        match dequeue_waiter q with
+        match pop_waiter q with
         | Some (resolv_f, q) ->
             (* A waiter found. resolve it *)
             resolv_f (Ok value);
