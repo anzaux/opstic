@@ -67,39 +67,45 @@ struct
   module Lin = Lin
 
   module Witness = struct
-    type 'm inp_choice =
-      | InpChoice : {
-          inp_choice_role : ('m, 'l) Rows.constr;
-          inp_choice_label : ('l, 'v * 'b t) Rows.constr;
-          inp_choice_marshal : payload -> 'v;
-          inp_choice_next_wit : 'b;
+    type _ inp_label_choice =
+      | InpLabelChoice : {
+          inp_label_choice_label : ('l, 'v * 'b t) Rows.constr;
+          inp_label_choice_marshal : payload -> 'v;
+          inp_label_choice_next_wit : 'b;
         }
-          -> 'm inp_choice
+          -> 'l inp_label_choice
+
+    type _ inp_role_choice =
+      | InpRoleChoice : {
+          inp_role_choice_role : ('m, 'l -> unit io) Rows.constr;
+          inp_role_choice_choices : (string, 'l inp_label_choice) Hashtbl.t;
+        }
+          -> 'm inp_role_choice
 
     type 'm inp = {
       inp_roles : string list;
-      inp_choices : (string * string, 'm inp_choice) Hashtbl.t;
+      inp_choices : 'm inp_role_choice list;
       inp_connection : connection;
     }
-      constraint 'm = [> ]
+    (* constraint 'm = [> ] *)
 
-    let make_inp ?(conn = Connected) (xs : 'm inp_choice list) : 'm inp =
-      let tbl = Hashtbl.create (List.length xs) in
-      let rec put_all = function
-        | (InpChoice c0 as c) :: xs ->
-            Hashtbl.add tbl
-              (c0.inp_choice_role.constr_name, c0.inp_choice_label.constr_name)
-              c;
-            put_all xs
-        | [] -> ()
-      in
-      put_all xs;
-      let roles =
-        xs |> List.map (fun (InpChoice c0) -> c0.inp_choice_role.constr_name)
-      in
-      { inp_roles = roles; inp_connection = conn; inp_choices = tbl }
+    (* let make_inp ?(conn = Connected) (xs : 'm inp_choice list) : 'm inp =
+       let tbl = Hashtbl.create (List.length xs) in
+       let rec put_all = function
+         | (InpChoice c0 as c) :: xs ->
+             Hashtbl.add tbl
+               (c0.inp_choice_role.constr_name, c0.inp_choice_label.constr_name)
+               c;
+             put_all xs
+         | [] -> ()
+       in
+       put_all xs;
+       let roles =
+         xs |> List.map (fun (InpChoice c0) -> c0.inp_choice_role.constr_name)
+       in
+       { inp_roles = roles; inp_connection = conn; inp_choices = tbl } *)
 
-    type 'm out_choice =
+    type _ out_choice =
       | OutChoice : {
           out_choice_role : ('m, 'l) Rows.constr;
           out_choice_label : ('l, 'v * ('b t -> unit io)) Rows.constr;
@@ -147,19 +153,35 @@ struct
       in
       loop out.out_choices
 
-    let receive : ([> ] as 'a) inp ep -> ('a -> unit io) -> unit io =
-     fun ep callback ->
-      let inp = Lin.get ep.ep_witness in
-      let* role, label, v =
-        Endpoint.receive ep.ep_raw ~roles:inp.inp_roles
-          ~connection:inp.inp_connection
+    let do_receive (type l) ep ~role ~connection
+        ~(labels : (string, l Witness.inp_label_choice) Hashtbl.t)
+        ~(callback : l -> unit io) : unit io =
+      let* role', label, payload =
+        Endpoint.receive ep.ep_raw ~roles:[ role ] ~connection
       in
-      let (InpChoice c) = Hashtbl.find inp.inp_choices (role, label) in
-      let v = c.inp_choice_marshal v in
-      callback
-        (c.inp_choice_role.make_var
-           (c.inp_choice_label.make_var
-              (v, { ep with ep_witness = Lin.create c.inp_choice_next_wit })))
+      assert (role = role');
+      let (InpLabelChoice cl) = Hashtbl.find labels label in
+      let value = cl.inp_label_choice_marshal payload
+      and ep =
+        { ep with ep_witness = Lin.create cl.inp_label_choice_next_wit }
+      in
+      callback (cl.inp_label_choice_label.make_var (value, ep))
+
+    let receive : ([> ] as 'a) inp ep -> 'a -> unit io =
+     fun ep role_choice ->
+      let inp = Lin.get ep.ep_witness in
+      let rec loop = function
+        | [] -> failwith ""
+        | Witness.InpRoleChoice cr :: cs -> (
+            match cr.inp_role_choice_role.match_var role_choice with
+            | None -> loop cs
+            | Some callback ->
+                let role = cr.inp_role_choice_role.constr_name
+                and labels = cr.inp_role_choice_choices
+                and connection = inp.inp_connection in
+                do_receive ep ~role ~connection ~labels ~callback)
+      in
+      loop inp.inp_choices
 
     let close (ep : unit ep) =
       ignore @@ Lin.get ep.ep_witness;
