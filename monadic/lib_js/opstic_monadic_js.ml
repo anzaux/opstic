@@ -11,7 +11,7 @@ type nonrec t = {
 [@@warning "-69"]
 
 module ServerEndpoint :
-  Opstic_monadic.Endpoint
+  Opstic.Endpoint
     with type t = t
      and type 'x io = 'x ServerIo.t
      and type payload = payload = struct
@@ -131,7 +131,7 @@ module Mpst_js = struct
                ( v,
                  {
                    ep_raw = t;
-                   ep_witness = Opstic_monadic.Lin.create c.inp_choice_next_wit;
+                   ep_witness = Opstic.Lin.create c.inp_choice_next_wit;
                  } ))
     | _ -> error_with (Format.asprintf "bad payload: %a" Json.pp_lit payload)
 

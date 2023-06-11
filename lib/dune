@@ -4,6 +4,7 @@
  (libraries rows)
  (preprocess
   (pps
+   rows.ppx
    js_of_ocaml-ppx
    ppx_deriving.show
    ppx_deriving.eq

@@ -78,7 +78,7 @@ struct
     type _ inp_role_choice =
       | InpRoleChoice : {
           inp_role_choice_role : ('m, 'l -> unit io) Rows.constr;
-          inp_role_choice_choices : (string, 'l inp_label_choice) Hashtbl.t;
+          inp_role_choice_labels : (string, 'l inp_label_choice) Hashtbl.t;
         }
           -> 'm inp_role_choice
 
@@ -87,23 +87,40 @@ struct
       inp_choices : 'm inp_role_choice list;
       inp_connection : connection;
     }
-    (* constraint 'm = [> ] *)
+      constraint 'm = [> ]
 
-    (* let make_inp ?(conn = Connected) (xs : 'm inp_choice list) : 'm inp =
-       let tbl = Hashtbl.create (List.length xs) in
-       let rec put_all = function
-         | (InpChoice c0 as c) :: xs ->
-             Hashtbl.add tbl
-               (c0.inp_choice_role.constr_name, c0.inp_choice_label.constr_name)
-               c;
-             put_all xs
-         | [] -> ()
-       in
-       put_all xs;
-       let roles =
-         xs |> List.map (fun (InpChoice c0) -> c0.inp_choice_role.constr_name)
-       in
-       { inp_roles = roles; inp_connection = conn; inp_choices = tbl } *)
+    type _ inp_role_spec =
+      | InpRoleSpec : {
+          inp_role_spec_role : ('m, 'l -> unit io) Rows.constr;
+          inp_role_spec_labels : 'l inp_label_choice list;
+        }
+          -> 'm inp_role_spec
+
+    let make_inp ?(conn = Connected) (xs : 'm inp_role_spec list) : 'm inp =
+      let rec put_all tbl = function
+        | (InpLabelChoice c0 as c) :: xs ->
+            Hashtbl.add tbl c0.inp_label_choice_label.constr_name c;
+            put_all tbl xs
+        | [] -> ()
+      in
+      let make_role_choice (InpRoleSpec c) =
+        let hash = Hashtbl.create (List.length c.inp_role_spec_labels) in
+        put_all hash c.inp_role_spec_labels;
+        InpRoleChoice
+          {
+            inp_role_choice_role = c.inp_role_spec_role;
+            inp_role_choice_labels = hash;
+          }
+      in
+      let roles =
+        xs
+        |> List.map (fun (InpRoleSpec c0) -> c0.inp_role_spec_role.constr_name)
+      in
+      {
+        inp_roles = roles;
+        inp_connection = conn;
+        inp_choices = List.map make_role_choice xs;
+      }
 
     type _ out_choice =
       | OutChoice : {
@@ -171,13 +188,13 @@ struct
      fun ep role_choice ->
       let inp = Lin.get ep.ep_witness in
       let rec loop = function
-        | [] -> failwith ""
+        | [] -> failwith "protocol error"
         | Witness.InpRoleChoice cr :: cs -> (
             match cr.inp_role_choice_role.match_var role_choice with
             | None -> loop cs
             | Some callback ->
                 let role = cr.inp_role_choice_role.constr_name
-                and labels = cr.inp_role_choice_choices
+                and labels = cr.inp_role_choice_labels
                 and connection = inp.inp_connection in
                 do_receive ep ~role ~connection ~labels ~callback)
       in
@@ -187,4 +204,203 @@ struct
       ignore @@ Lin.get ep.ep_witness;
       Endpoint.close ep.ep_raw
   end
+end
+
+module type Channel = sig
+  type t
+  type _ io
+  type payload
+
+  val create : unit -> t
+  val send : t -> string * payload -> unit
+  val receive : t -> (string * payload) io
+  val close : t -> unit
+end
+
+module LocalEndpoint (Io : Monadic) (C : Channel with type 'x io = 'x Io.t) : sig
+  include Endpoint with type 'x io = 'x Io.t and type payload = C.payload
+
+  val make : string list -> (string * t) list
+end
+with type 'x io = 'x C.io
+ and type payload = C.payload = struct
+  type payload = C.payload
+  type 'x io = 'x C.io
+
+  let ( let* ) = Io.bind
+
+  type raw_channel = {
+    raw_send : string * payload -> unit;
+    raw_receive : unit -> (string * payload) io;
+    raw_close : unit -> unit;
+  }
+
+  type t = { raw_channels : (string, raw_channel) Hashtbl.t }
+
+  let send t ~connection:_ ~role ~label ~payload =
+    (Hashtbl.find t.raw_channels role).raw_send (label, payload);
+    Io.return ()
+
+  let receive t ~connection:_ ~roles =
+    match roles with
+    | [ role ] ->
+        let* label, value = (Hashtbl.find t.raw_channels role).raw_receive () in
+        Io.return (role, label, value)
+    | _ ->
+        failwith
+          "TODO: Opstic_monadic (native): Cannot wait for multirple roles"
+
+  let close t = Hashtbl.iter (fun _ ch -> ch.raw_close ()) t.raw_channels
+
+  let make (roles : string list) : (string * t) list =
+    let all_tables =
+      let t = Hashtbl.create (List.length roles - 1) in
+      roles
+      |> List.fold_left
+           (fun t r ->
+             Hashtbl.add t r (Hashtbl.create (List.length roles - 1));
+             t)
+           t
+    in
+    let rec create_bidirectional_channels (myname : string)
+        (theirnames : string list) =
+      match theirnames with
+      | [] -> ()
+      | othrname :: rest ->
+          let me2othr = C.create () in
+          let othr2me = C.create () in
+          let mychan : raw_channel =
+            {
+              raw_send = C.send me2othr;
+              raw_receive = (fun () -> C.receive othr2me);
+              raw_close = ignore;
+            }
+          and othrchan : raw_channel =
+            {
+              raw_send = C.send othr2me;
+              raw_receive = (fun () -> C.receive me2othr);
+              raw_close = ignore;
+            }
+          in
+          let mytbl = Hashtbl.find all_tables myname in
+          let othrtbl = Hashtbl.find all_tables othrname in
+          Hashtbl.add mytbl othrname mychan;
+          Hashtbl.add othrtbl myname othrchan;
+          create_bidirectional_channels myname rest
+    in
+    let rec create_all = function
+      | r :: rs ->
+          create_bidirectional_channels r rs;
+          create_all rs
+      | [] -> ()
+    in
+    create_all roles;
+    roles
+    |> List.map (fun r -> (r, { raw_channels = Hashtbl.find all_tables r }))
+end
+
+module type Marshal = sig
+  type payload
+
+  val to_dyn : 'a -> payload
+  val from_dyn : payload -> 'a
+end
+
+module Sample0
+    (Io : Monadic)
+    (Endpoint : Endpoint with type 'x io = 'x Io.t)
+    (Marshal : Marshal with type payload = Endpoint.payload) =
+struct
+  module Mpst = Make (Io) (Endpoint)
+  open! Mpst
+  open! Rows
+
+  [%%declare_constr a]
+  [%%declare_constr b]
+  [%%declare_constr lab]
+  [%%declare_constr lab2]
+  [%%declare_constr lab3]
+
+  let sample1 () =
+    let wit_a =
+      let open Witness in
+      (Witness.make_inp ~conn:Join
+         [
+           InpRoleSpec
+             {
+               inp_role_spec_role = b;
+               inp_role_spec_labels =
+                 [
+                   InpLabelChoice
+                     {
+                       inp_label_choice_label = lab;
+                       inp_label_choice_marshal =
+                         (Marshal.from_dyn : payload -> unit);
+                       inp_label_choice_next_wit =
+                         (Witness.make_out ~conn:Connected
+                            [
+                              OutChoice
+                                {
+                                  out_choice_role = b;
+                                  out_choice_label = lab2;
+                                  out_choice_marshal =
+                                    (Marshal.to_dyn : unit -> payload);
+                                  out_choice_next_wit = ();
+                                };
+                              OutChoice
+                                {
+                                  out_choice_role = b;
+                                  out_choice_label = lab3;
+                                  out_choice_marshal =
+                                    (Marshal.to_dyn : unit -> payload);
+                                  out_choice_next_wit = ();
+                                };
+                            ]
+                           : [< `b of [ `lab2 of _ | `lab3 of _ ] ] out);
+                     };
+                 ];
+             };
+         ]
+        : [< `b of _ ] inp)
+      (* NB this type annotation is mandatory for session-type safety *)
+    and wit_b =
+      let open Witness in
+      (Witness.make_out ~conn:Connected
+         [
+           OutChoice
+             {
+               out_choice_role = a;
+               out_choice_label = lab;
+               out_choice_marshal = (Marshal.to_dyn : unit -> payload);
+               out_choice_next_wit =
+                 (make_inp
+                    [
+                      InpRoleSpec
+                        {
+                          inp_role_spec_role = a;
+                          inp_role_spec_labels =
+                            [
+                              InpLabelChoice
+                                {
+                                  inp_label_choice_label = lab2;
+                                  inp_label_choice_marshal =
+                                    (Marshal.from_dyn : payload -> unit);
+                                  inp_label_choice_next_wit = ();
+                                };
+                              InpLabelChoice
+                                {
+                                  inp_label_choice_label = lab3;
+                                  inp_label_choice_marshal =
+                                    (Marshal.from_dyn : payload -> unit);
+                                  inp_label_choice_next_wit = ();
+                                };
+                            ];
+                        };
+                    ]
+                   : [< `a of _ ] inp);
+             };
+         ]
+        : [< `a of [ `lab of _ ] ] out)
+    in
+    (wit_a, wit_b)
 end

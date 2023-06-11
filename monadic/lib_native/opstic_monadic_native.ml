@@ -18,7 +18,7 @@ module Io = struct
   let bind x f = f x
 end
 
-module Endpoint = Opstic_monadic.LocalEndpoint (Io) (SynchronousChannel)
+module Endpoint = Opstic.LocalEndpoint (Io) (SynchronousChannel)
 module Direct = Opstic_monadic.Make (Io) (Endpoint)
 open Direct
 

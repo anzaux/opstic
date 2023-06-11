@@ -84,13 +84,13 @@ let add_shared_waiter t shared_resolv_f =
           (* Update the state by enqueuing the resolve function *)
           t := EmptyWaiting (Queue.push shared_resolv_f resq)
       | Queued q ->
+          shared_resolv_f := None;
           let v, q =
             match Queue.pop q with
             | Some x -> x
             | None -> assert false (* |q|>0 *)
           in
           t := if Queue.is_empty q then EmptyNotWaiting else Queued q;
-          shared_resolv_f := None;
           resolv_f (Ok v))
 
 let add_waiter t resolv_f = add_shared_waiter t (ref (Some resolv_f))
