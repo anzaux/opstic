@@ -3,23 +3,7 @@ open! Types
 type t
 
 val create_server : unit -> t
-
-module Handler : sig
-  type entrypoint_kind =
-    | StartLeader of role
-    | StartFollower of role * conversation_id
-    | Join of role
-    | JoinCorrelation of role * conversation_id
-    | InSession of http_session_id
-  [@@deriving show]
-
-  val handle_entry :
-    t ->
-    entrypoint_id:entrypoint_id ->
-    entrypoint_kind:entrypoint_kind ->
-    request:http_request ->
-    http_response io
-end
+val handle_request : t -> payload -> payload io
 
 module Mpst : sig
   val accept_initial :
