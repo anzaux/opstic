@@ -1,5 +1,6 @@
 open! Kxclib
 open! Opstic_js
+open Opstic_js.ServerEndpoint
 
 module Mpst_js = struct
   open ServerIo
