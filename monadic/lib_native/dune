@@ -1,5 +1,5 @@
 (library
- (name opstic_native)
+ (name opstic_monadic_native)
  (public_name opstic.monadic.native)
  (inline_tests)
  (libraries opstic_monadic threads)

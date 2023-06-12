@@ -246,9 +246,11 @@ with type 'x io = 'x C.io
     | [ role ] ->
         let* label, value = (Hashtbl.find t.raw_channels role).raw_receive () in
         Io.return (role, label, value)
+    | [] -> failwith "No role is given"
     | _ ->
         failwith
-          "TODO: Opstic_monadic (native): Cannot wait for multirple roles"
+          ("TODO: Opstic: Cannot wait for multirple roles: "
+         ^ String.concat "," roles)
 
   let close t = Hashtbl.iter (fun _ ch -> ch.raw_close ()) t.raw_channels
 
@@ -335,7 +337,7 @@ struct
                      {
                        inp_label_choice_label = lab;
                        inp_label_choice_marshal =
-                         (Marshal.from_dyn : payload -> unit);
+                         (Marshal.from_dyn : payload -> int);
                        inp_label_choice_next_wit =
                          (Witness.make_out ~conn:Connected
                             [
@@ -371,7 +373,7 @@ struct
              {
                out_choice_role = a;
                out_choice_label = lab;
-               out_choice_marshal = (Marshal.to_dyn : unit -> payload);
+               out_choice_marshal = (Marshal.to_dyn : int -> payload);
                out_choice_next_wit =
                  (make_inp
                     [

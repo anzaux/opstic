@@ -99,8 +99,15 @@ module Make (Io : Monadic) (Endpoint : Endpoint with type 'x io = 'x Io.t) :
         | [] -> ()
       in
       put_all xs;
+      let uniq xs =
+        let hash = Hashtbl.create (List.length xs) in
+        xs |> List.iter (fun x -> Hashtbl.replace hash x ());
+        Hashtbl.to_seq_keys hash |> List.of_seq
+      in
       let roles =
-        xs |> List.map (fun (InpChoice c0) -> c0.inp_choice_role.constr_name)
+        xs
+        |> List.map (fun (InpChoice c0) -> c0.inp_choice_role.constr_name)
+        |> uniq
       in
       { inp_roles = roles; inp_connection = conn; inp_choices = tbl }
 

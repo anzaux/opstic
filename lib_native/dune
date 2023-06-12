@@ -1,0 +1,7 @@
+(library
+ (name opstic_native)
+ (public_name opstic.native)
+ (inline_tests)
+ (libraries opstic threads)
+ (preprocess
+  (pps ppx_inline_test)))
