@@ -5,10 +5,10 @@ type 'x io = 'x ServerIo.t
 
 type nonrec ep = {
   server_ref : Server.t;
-  protocol : Server.protocol_spec;
+  protocol : Server.entrypoint_spec;
   conversation_id : conversation_id;
   self_role : role;
-  role_http_session_id : (role, http_session_id option) Hashtbl.t;
+  sessions : (role, http_session_id option) Hashtbl.t;
 }
 [@@warning "-69"]
 
@@ -22,7 +22,7 @@ let ( let* ) = ServerIo.bind
 type nonrec payload = payload
 
 let get_session_id ~ctx t role =
-  match Hashtbl.find t.role_http_session_id role with
+  match Hashtbl.find t.sessions role with
   | Some s -> return s
   | None ->
       error_with
@@ -65,3 +65,29 @@ let receive t ~(connection : Opstic.connection) ~roles =
 let close _ =
   (* TODO purge all sessions from server *)
   ()
+
+type 't protocol = { entrypoint_spec : Server.entrypoint_spec; witness : 't }
+
+let make_protocol ~witness ~entrypoint_id ~kind ~my_role ~other_roles
+    ~initial_roles ~joining_roles ~joining_correlation_roles =
+  let spec =
+    Server.make_entrypoint_spec ~entrypoint_id ~kind ~my_role ~other_roles
+      ~initial_roles ~joining_roles ~joining_correlation_roles ()
+  in
+  { entrypoint_spec = spec; witness }
+
+let register_protocol server ~protocol =
+  Server.register_entrypoint server ~spec:protocol.entrypoint_spec
+
+let create ~server ~protocol ~conversation_id =
+  let open Server in
+  let sessions = Hashtbl.create 42 in
+  protocol.entrypoint_spec.other_roles
+  |> List.iter (fun role -> Hashtbl.replace sessions role None);
+  {
+    server_ref = server;
+    protocol = protocol.entrypoint_spec;
+    conversation_id;
+    self_role = protocol.entrypoint_spec.my_role;
+    sessions;
+  }

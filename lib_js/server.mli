@@ -28,7 +28,7 @@ module Mpst : sig
     t -> http_session_id:http_session_id -> http_response -> unit io
 end
 
-type protocol_spec = {
+type entrypoint_spec = {
   entrypoint_id : entrypoint_id;
   kind : [ `Leader | `Follower ];
   my_role : role;
@@ -39,7 +39,7 @@ type protocol_spec = {
 }
 [@@deriving show]
 
-val make_spec :
+val make_entrypoint_spec :
   entrypoint_id:string ->
   kind:[ `Leader | `Follower ] ->
   my_role:string ->
@@ -48,6 +48,6 @@ val make_spec :
   ?joining_roles:string list ->
   ?joining_correlation_roles:string list ->
   unit ->
-  protocol_spec
+    entrypoint_spec
 
-val register_entrypoint : t -> spec:protocol_spec -> unit
+val register_entrypoint : t -> spec:entrypoint_spec -> unit

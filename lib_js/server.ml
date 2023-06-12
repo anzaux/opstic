@@ -60,7 +60,7 @@ let create_server () : t =
     established_sessions = Hashtbl.create 42;
   }
 
-type protocol_spec = {
+type entrypoint_spec = {
   entrypoint_id : EntrypointId.t;
   kind : [ `Leader | `Follower ];
   my_role : Role.t;
@@ -71,7 +71,7 @@ type protocol_spec = {
 }
 [@@deriving show]
 
-let make_spec ~entrypoint_id ~kind ~my_role ~other_roles ~initial_roles
+let make_entrypoint_spec ~entrypoint_id ~kind ~my_role ~other_roles ~initial_roles
     ?(joining_roles = []) ?(joining_correlation_roles = []) () =
   {
     entrypoint_id = EntrypointId.create entrypoint_id;

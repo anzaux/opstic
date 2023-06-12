@@ -10,30 +10,16 @@ module Mpst_js = struct
   module Mpst_js = Opstic_monadic.Make (ServerIo) (Opstic_js.ServerEndpoint)
 
   let accept_start_session :
-      (* FIXME bad API style *)
-      Server.t ->
-      spec:Server.protocol_spec ->
-      witness:'b Mpst_js.Comm.inp ->
-      'b ServerIo.t =
-   fun server ~spec ~witness ->
+      Server.t -> protocol:'b Mpst_js.Comm.inp protocol -> 'b ServerIo.t =
+   fun server ~protocol ->
     let* conversation_id, role, http_session_id =
-      Server.Mpst.accept_initial server ~entrypoint_id:spec.entrypoint_id
-        ~kind:`AsLeader ~roles:spec.other_roles
+      Server.Mpst.accept_initial server
+        ~entrypoint_id:protocol.entrypoint_spec.entrypoint_id ~kind:`AsLeader
+        ~roles:protocol.entrypoint_spec.other_roles
     in
-    let role_http_session_id = Hashtbl.create 42 in
-    spec.other_roles
-    |> List.iter (fun role -> Hashtbl.replace role_http_session_id role None);
-    Hashtbl.replace role_http_session_id role (Some http_session_id);
-    let t =
-      {
-        server_ref = server;
-        protocol = spec;
-        conversation_id;
-        self_role = spec.my_role;
-        role_http_session_id;
-      }
-    in
-    let inp = witness in
+    let t = ServerEndpoint.create ~server ~protocol ~conversation_id in
+    Hashtbl.replace t.sessions role (Some http_session_id);
+    let inp = protocol.witness in
     (* FIXME use Comm.receive instead *)
     let* payload = Server.Mpst.receive_from_client server ~http_session_id in
     let* payload =
