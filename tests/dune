@@ -1,4 +1,4 @@
 (test
  (name test_direct)
  (modules test_direct)
- (libraries opstic_monadic oUnit))
+ (libraries opstic oUnit))

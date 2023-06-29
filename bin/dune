@@ -1,5 +1,5 @@
 (executable
  (name main)
- (libraries opstic_monadic)
+ (libraries opstic)
  (preprocess (pps opstic_ppx))
  )

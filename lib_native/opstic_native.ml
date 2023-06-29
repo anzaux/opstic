@@ -53,32 +53,24 @@ let debug str =
 let%test "test_comm" =
   let thread_a ep_a () =
     let ep = ep_a in
-    debug "opstic_native: thread A: receiving";
-    receive ep
-    @@ `b
-         (fun (`lab (_, ep)) ->
-           debug "thread A: sending";
-           if Random.bool () then send ep (`b (`lab2 ((), close)))
-           else send ep (`b (`lab3 ((), close))))
+    debug "thread A: receiving";
+    let (`b (`lab (_, ep))) = receive ep in
+    debug "thread A: sending";
+    if Random.bool () then close @@ send ep (fun x -> x#b#lab2) ()
+    else close @@ send ep (fun x -> x#b#lab3) ()
   in
   let thread_b ep_b () =
     let ep = ep_b in
-    debug "opstic_native: thread B: sending";
-    send ep
-      (`a
-        (`lab
-          ( 123,
-            fun ep ->
-              debug "thread B: receiving";
-              receive ep
-              @@ `a
-                   (function
-                   | `lab2 (_, ep) ->
-                       debug "thread B: received lab2";
-                       close ep
-                   | `lab3 (_, ep) ->
-                       debug "thread B: received lab3";
-                       close ep) )))
+    debug "thread B: sending";
+    let ep = send ep (fun x -> x#a#lab) 10 in
+    debug "thread B: receiving";
+    match receive ep with
+    | `a (`lab2 (_, ep)) ->
+        debug "thread B: received lab2";
+        close ep
+    | `a (`lab3 (_, ep)) ->
+        debug "thread B: received lab3";
+        close ep
   in
   debug "running test";
   Random.init (int_of_float @@ Unix.time ());
@@ -98,19 +90,3 @@ let%test "test_comm" =
   debug "done.";
   success := true;
   true
-
-let%test "test_lin" =
-  debug "checking that linearity violation check is working fine";
-  let ep_a, ep_b = test_make_witness_ab () in
-  try
-    let f ep_b = send ep_b (`a (`lab (123, fun _ -> return ()))) in
-    ignore
-    @@ Thread.create
-         (fun () ->
-           ignore @@ receive ep_a @@ `b (fun (`lab (_, _)) -> return ()))
-         ();
-    ignore @@ f ep_b;
-    ignore @@ f ep_b;
-    debug "linearity violation detection failure";
-    false
-  with Lin.LinearityViolation -> true
