@@ -1,6 +1,6 @@
-type connection = Connected | Join | JoinCorrelation
+type kind = [ `Greeting | `GreetingWithId | `Established ]
 
-module Id = Id
+module Id : module type of Id = Id
 
 module type Monadic = sig
   type _ t
@@ -15,18 +15,10 @@ module type Endpoint = sig
   type payload
 
   val send :
-    t ->
-    connection:connection ->
-    role:string ->
-    label:string ->
-    payload:payload ->
-    unit io
+    t -> kind:kind -> role:string -> label:string -> payload:payload -> unit io
 
   val receive :
-    t ->
-    connection:connection ->
-    roles:string list ->
-    (string * string * payload) io
+    t -> kind:kind -> roles:string list -> (string * string * payload) io
 
   val close : t -> unit
 end
@@ -85,7 +77,7 @@ struct
     type 'm inp = {
       inp_roles : string list;
       inp_choices : 'm inp_role_choice list;
-      inp_connection : connection;
+      inp_kind : kind;
     }
       constraint 'm = [> ]
 
@@ -96,7 +88,8 @@ struct
         }
           -> 'm inp_role_spec
 
-    let make_inp ?(conn = Connected) (xs : 'm inp_role_spec list) : 'm inp =
+    let make_inp ?(req_kind = `Established) (xs : 'm inp_role_spec list) : 'm inp
+        =
       let rec put_all tbl = function
         | (InpLabelChoice c0 as c) :: xs ->
             Hashtbl.add tbl c0.inp_label_choice_label.constr_name c;
@@ -118,7 +111,7 @@ struct
       in
       {
         inp_roles = roles;
-        inp_connection = conn;
+        inp_kind = req_kind;
         inp_choices = List.map make_role_choice xs;
       }
 
@@ -133,12 +126,12 @@ struct
 
     type 'm out = {
       out_choices : 'm out_choice list;
-      out_connection : connection;
+      out_kind : kind;
     }
       constraint 'm = [> ]
 
-    let make_out ?(conn = Connected) (xs : 'm out_choice list) : 'm out =
-      { out_connection = conn; out_choices = xs }
+    let make_out ?(req_kind = `Established) (xs : 'm out_choice list) : 'm out =
+      { out_kind = req_kind; out_choices = xs }
   end
 
   module Comm = struct
@@ -159,7 +152,7 @@ struct
             | None -> loop cs
             | Some (v, callback) ->
                 let* () =
-                  Endpoint.send ep.ep_raw ~connection:out.out_connection
+                  Endpoint.send ep.ep_raw ~kind:out.out_kind
                     ~role:c.out_choice_role.constr_name
                     ~label:c.out_choice_label.constr_name
                     ~payload:(c.out_choice_marshal v)
@@ -170,11 +163,11 @@ struct
       in
       loop out.out_choices
 
-    let do_receive (type l) ep ~role ~connection
+    let do_receive (type l) ep ~role ~kind
         ~(labels : (string, l Witness.inp_label_choice) Hashtbl.t)
         ~(callback : l -> unit io) : unit io =
       let* role', label, payload =
-        Endpoint.receive ep.ep_raw ~roles:[ role ] ~connection
+        Endpoint.receive ep.ep_raw ~roles:[ role ] ~kind
       in
       assert (role = role');
       let (InpLabelChoice cl) = Hashtbl.find labels label in
@@ -195,8 +188,8 @@ struct
             | Some callback ->
                 let role = cr.inp_role_choice_role.constr_name
                 and labels = cr.inp_role_choice_labels
-                and connection = inp.inp_connection in
-                do_receive ep ~role ~connection ~labels ~callback)
+                and kind = inp.inp_kind in
+                do_receive ep ~role ~kind ~labels ~callback)
       in
       loop inp.inp_choices
 
@@ -237,11 +230,11 @@ with type 'x io = 'x C.io
 
   type t = { raw_channels : (string, raw_channel) Hashtbl.t }
 
-  let send t ~connection:_ ~role ~label ~payload =
+  let send t ~kind:_ ~role ~label ~payload =
     (Hashtbl.find t.raw_channels role).raw_send (label, payload);
     Io.return ()
 
-  let receive t ~connection:_ ~roles =
+  let receive t ~kind:_ ~roles =
     match roles with
     | [ role ] ->
         let* label, value = (Hashtbl.find t.raw_channels role).raw_receive () in
@@ -326,7 +319,7 @@ struct
   let sample1 () =
     let wit_a =
       let open Witness in
-      (Witness.make_inp ~conn:Join
+      (Witness.make_inp ~req_kind:`Greeting
          [
            InpRoleSpec
              {
@@ -339,7 +332,7 @@ struct
                        inp_label_choice_marshal =
                          (Marshal.from_dyn : payload -> int);
                        inp_label_choice_next_wit =
-                         (Witness.make_out ~conn:Connected
+                         (Witness.make_out ~req_kind:`Established
                             [
                               OutChoice
                                 {
@@ -367,7 +360,7 @@ struct
       (* NB this type annotation is mandatory for session-type safety *)
     and wit_b =
       let open Witness in
-      (Witness.make_out ~conn:Connected
+      (Witness.make_out ~req_kind:`Greeting
          [
            OutChoice
              {

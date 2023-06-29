@@ -23,25 +23,26 @@ module type S = sig
     type 'a inp = {
       inp_roles : string list;
       inp_choices : (string * string, 'a inp_choice) Hashtbl.t;
-      inp_connection : connection;
+      inp_kind : kind;
     }
       constraint 'a = [> ]
 
-    val make_inp : ?conn:connection -> ([> ] as 'a) inp_choice list -> 'a inp
+    val make_inp :
+      ?kind:kind -> ([> ] as 'a) inp_choice list -> 'a inp
 
     type ('v, 'a) out = {
       out_role : string;
       out_label : string;
       out_marshal : 'v -> payload;
       out_next_wit : 'a;
-      out_connection : connection;
+      out_kind : kind;
     }
 
     val make_out :
       role:string ->
       label:string ->
       marshal:('a -> payload) ->
-      ?conn:connection ->
+      ?kind:kind ->
       'b ->
       ('a, 'b) out
   end
@@ -84,11 +85,11 @@ module Make (Io : Monadic) (Endpoint : Endpoint with type 'x io = 'x Io.t) :
     type 'a inp = {
       inp_roles : string list;
       inp_choices : (string * string, 'a inp_choice) Hashtbl.t;
-      inp_connection : connection;
+      inp_kind : kind;
     }
       constraint 'a = [> ]
 
-    let make_inp ?(conn = Connected) (xs : 'm inp_choice list) : 'm inp =
+    let make_inp ?(kind = `Established) (xs : 'm inp_choice list) : 'm inp =
       let tbl = Hashtbl.create (List.length xs) in
       let rec put_all = function
         | (InpChoice c0 as c) :: xs ->
@@ -109,23 +110,23 @@ module Make (Io : Monadic) (Endpoint : Endpoint with type 'x io = 'x Io.t) :
         |> List.map (fun (InpChoice c0) -> c0.inp_choice_role.constr_name)
         |> uniq
       in
-      { inp_roles = roles; inp_connection = conn; inp_choices = tbl }
+      { inp_roles = roles; inp_kind = kind; inp_choices = tbl }
 
     type ('v, 'a) out = {
       out_role : string;
       out_label : string;
       out_marshal : 'v -> payload;
       out_next_wit : 'a;
-      out_connection : connection;
+      out_kind : kind;
     }
 
-    let make_out ~role ~label ~marshal ?(conn = Connected) next =
+    let make_out ~role ~label ~marshal ?(kind = `Established) next =
       {
         out_role = role;
         out_label = label;
         out_marshal = marshal;
         out_next_wit = next;
-        out_connection = conn;
+        out_kind = kind;
       }
   end
 
@@ -138,7 +139,7 @@ module Make (Io : Monadic) (Endpoint : Endpoint with type 'x io = 'x Io.t) :
      fun ep call (*fun x -> x#a#lab*) v ->
       let out : ('v, 'b) out = call (Lin.get ep.ep_witness) in
       Io.bind
-        (Endpoint.send ep.ep_raw ~connection:out.out_connection
+        (Endpoint.send ep.ep_raw ~kind:out.out_kind
            ~role:out.out_role ~label:out.out_label ~payload:(out.out_marshal v))
         (fun () ->
           Io.return { ep with ep_witness = Lin.create out.out_next_wit })
@@ -148,7 +149,7 @@ module Make (Io : Monadic) (Endpoint : Endpoint with type 'x io = 'x Io.t) :
       let inp = Lin.get ep.ep_witness in
       Io.bind
         (Endpoint.receive ep.ep_raw ~roles:inp.inp_roles
-           ~connection:inp.inp_connection) (fun (role, label, v) ->
+           ~kind:inp.inp_kind) (fun (role, label, v) ->
           let (InpChoice c) = Hashtbl.find inp.inp_choices (role, label) in
           let v = c.inp_choice_marshal v in
           Io.return
@@ -180,7 +181,7 @@ struct
   let sample1 () =
     let wit_a =
       let open Witness in
-      (Witness.make_inp ~conn:Join
+      (Witness.make_inp ~kind:`Greeting
          [
            InpChoice
              {
@@ -210,7 +211,7 @@ struct
         method a =
           object
             method lab =
-              Witness.make_out ~conn:Join ~role:"a" ~label:"lab"
+              Witness.make_out ~kind:`Greeting ~role:"a" ~label:"lab"
                 ~marshal:(Marshal.to_dyn : int -> payload)
                 (Witness.make_inp
                    [

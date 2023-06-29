@@ -1,5 +1,7 @@
 open! Kxclib
 
+exception QueueKilled of ServerIo.error
+
 type 'a ok_or_error = ('a, ServerIo.error) result
 type 'a waiting = 'a ok_or_error -> unit
 type 'a maybe_waiting = 'a waiting option
@@ -13,6 +15,7 @@ type 'a _t =
      NB: The waiter (reference cell) is possibly shared among queues (for `dequeue_one_of`).
      Once invoked, the waiter cell is set to None, to prevent being called again *)
   | EmptyWaiting of 'a maybe_waiting ref queue (* |q| > 0 *)
+  | Killed of ServerIo.error
 
 type 'a t = 'a _t ref
 
@@ -48,6 +51,7 @@ let enqueue t value =
         | None ->
             (* No waiter there, in fact. Enqueue it *)
             Queued (Queue.push value Queue.empty))
+    | Killed err -> raise (QueueKilled err)
   in
   t := q
 
@@ -73,6 +77,7 @@ let dequeue t =
       t := if Queue.is_empty q then EmptyNotWaiting else Queued q;
       (* and return it *)
       return retmsg
+  | Killed err -> raise (QueueKilled err)
 
 let add_shared_waiter t shared_resolv_f =
   match shared_resolv_f with
@@ -91,7 +96,8 @@ let add_shared_waiter t shared_resolv_f =
             | None -> assert false (* |q|>0 *)
           in
           t := if Queue.is_empty q then EmptyNotWaiting else Queued q;
-          resolv_f (Ok v))
+          resolv_f (Ok v)
+      | Killed err -> raise (QueueKilled err))
 
 let add_waiter t resolv_f = add_shared_waiter t (ref (Some resolv_f))
 
@@ -100,3 +106,23 @@ let dequeue_one_of ts =
   let shared_resolv_f = ref (Some resolv_f) in
   List.iter (fun t -> add_shared_waiter t shared_resolv_f) ts;
   promise
+
+let kill t err =
+  let t0 = !t in
+  t := Killed err;
+  match t0 with
+  | EmptyWaiting q ->
+      let rec loop q =
+        match Queue.pop q with
+        | Some (({ contents = Some resolv } as r), q) ->
+            r := None;
+            resolv (Error err);
+            loop q
+        | Some ({ contents = None }, q) -> loop q
+        | None -> ()
+      in
+      loop q
+  | EmptyNotWaiting | Killed _ -> ()
+  | Queued _ ->
+      Kxclib.Log0.warn "Non-empty concurrent queue is killed with error";
+      ()

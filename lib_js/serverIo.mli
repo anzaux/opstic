@@ -8,3 +8,4 @@ val create_promise : unit -> 'a t * (('a, error) result -> unit)
 val error : error -> 'a t
 val error_with : string -> 'a t
 val handle_error : 'a t -> handler:(error -> 'a t) -> 'a t
+val mpst_error : string -> error

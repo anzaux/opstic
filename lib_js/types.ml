@@ -14,5 +14,10 @@ type conversation_id = ConversationId.t [@@deriving show]
 type entrypoint_id = EntrypointId.t [@@deriving show]
 type role = Role.t [@@deriving show]
 type 'a io = 'a ServerIo.t
-type http_request = payload
+
+type http_request = {
+  request_body : payload;
+  request_onerror : ServerIo.error -> unit;
+}
+
 type http_response = payload

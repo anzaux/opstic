@@ -1,36 +1,25 @@
-open Types
+type 'x io = 'x ServerIo.t
+type payload = Types.payload
+type t
 
-type nonrec ep = {
-  server_ref : Server.t;
-  protocol : Server.entrypoint_spec;
-  conversation_id : conversation_id;
-  self_role : role;
-  sessions : (role, http_session_id option) Hashtbl.t;
-}
+val send :
+  t ->
+  kind:Opstic.kind ->
+  role:string ->
+  label:string ->
+  payload:Types.payload ->
+  unit ServerIo.t
 
-type 't protocol = { entrypoint_spec : Server.entrypoint_spec; witness : 't }
+val receive :
+  t ->
+  kind:Opstic.kind ->
+  roles:string list ->
+  (string * string * Types.payload) ServerIo.t
 
-val make_protocol :
-  witness:'a ->
-  entrypoint_id:string ->
-  kind:[ `Follower | `Leader ] ->
-  my_role:string ->
-  other_roles:string list ->
-  initial_roles:string list ->
-  joining_roles:string list ->
-  joining_correlation_roles:string list ->
-  'a protocol
-
-val register_protocol : Server.t -> protocol:'a protocol -> unit
-
-include
-  Opstic.Endpoint
-    with type t = ep
-     and type 'x io = 'x ServerIo.t
-     and type payload = payload
+val close : t -> unit
 
 val create :
-  server:Server.t ->
-  protocol:'a protocol ->
-  conversation_id:conversation_id ->
-  ep
+  ?get_label:(payload -> string io) ->
+  ?add_label:(string -> payload -> payload io) ->
+  Server.entrypoint ->
+  t
