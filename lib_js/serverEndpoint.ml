@@ -84,7 +84,7 @@ let msg_closing (session : Server.session) =
   ServerIo.mpst_error
     (Format.asprintf "Session %a for entrypoint %a is closed" ConversationId.pp
        session.conversation_id EntrypointId.pp
-       session.entrypoint_ref.spec.entrypoint_id)
+       session.entrypoint_ref.entrypoint_id)
 
 let close : t -> unit =
  fun t ->

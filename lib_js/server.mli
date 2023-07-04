@@ -2,12 +2,6 @@ open! Types
 
 type t
 
-type entrypoint_spec = {
-  entrypoint_id : entrypoint_id;
-  my_role : role;
-  other_roles : role list;
-}
-
 type greeting = {
   greeting_conversation_id : ConversationId.t option;
   greeting_request : http_request;
@@ -26,7 +20,9 @@ type session = {
 }
 
 and entrypoint = {
-  spec : entrypoint_spec;
+  entrypoint_id : entrypoint_id;
+  my_role : role;
+  other_roles : role list;
   greeting : (role, greeting_queue) Hashtbl.t;
   established : (conversation_id, session) Hashtbl.t;
 }

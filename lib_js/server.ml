@@ -8,12 +8,6 @@ let hash_find ~descr h k =
   | Some x -> return x
   | None -> error_with descr
 
-type entrypoint_spec = {
-  entrypoint_id : EntrypointId.t;
-  my_role : Role.t;
-  other_roles : Role.t list;
-}
-
 type greeting = {
   greeting_conversation_id : ConversationId.t option;
   greeting_request : http_request;
@@ -32,7 +26,9 @@ type session = {
 }
 
 and entrypoint = {
-  spec : entrypoint_spec;
+  entrypoint_id : EntrypointId.t;
+  my_role : Role.t;
+  other_roles : Role.t list;
   greeting : (Role.t, greeting_queue) Hashtbl.t;
   established : (ConversationId.t, session) Hashtbl.t;
 }
@@ -49,7 +45,7 @@ module Util = struct
     hash_find entrypoint.greeting role
       ~descr:
         (Format.asprintf "Entrypoint %a Role %a is not accepting peer"
-           EntrypointId.pp entrypoint.spec.entrypoint_id Role.pp role)
+           EntrypointId.pp entrypoint.entrypoint_id Role.pp role)
 
   let get_greeting_queue t entrypoint_id role =
     let* entrypoint = get_entrypoint t entrypoint_id in
@@ -68,7 +64,7 @@ module Util = struct
       ~descr:
         (Format.asprintf "No role %a for conversation %a (entrypoint %a)"
            Role.pp role ConversationId.pp session.conversation_id
-           EntrypointId.pp session.entrypoint_ref.spec.entrypoint_id)
+           EntrypointId.pp session.entrypoint_ref.entrypoint_id)
 
   let get_peer t entrypoint_id conversation_id role =
     let* session = get_session t entrypoint_id conversation_id in
@@ -88,15 +84,20 @@ end
 let create_server () : t = { entrypoints = Hashtbl.create 42 }
 
 let register_entrypoint (server : t) ~id ~my_role ~other_roles =
-  let spec = { entrypoint_id = id; my_role; other_roles } in
   let ent =
-    { spec; greeting = Hashtbl.create 42; established = Hashtbl.create 42 }
+    {
+      entrypoint_id = id;
+      my_role;
+      other_roles;
+      greeting = Hashtbl.create 42;
+      established = Hashtbl.create 42;
+    }
   in
   let register ent role =
     Hashtbl.replace ent.greeting role (ConcurrentQueue.create ())
   in
-  List.iter (register ent) spec.other_roles;
-  Hashtbl.replace server.entrypoints spec.entrypoint_id ent;
+  List.iter (register ent) other_roles;
+  Hashtbl.replace server.entrypoints id ent;
   ent
 
 let handle_entry server ~entrypoint_id ~path ~role
@@ -146,7 +147,7 @@ let kill_session entrypoint conversation_id err =
              ConcurrentQueue.kill peer.response_queue err)
 
 let create_session entrypoint conversation_id =
-  let roles = entrypoint.spec.other_roles in
+  let roles = entrypoint.other_roles in
   let peers = Hashtbl.create (List.length roles) in
   roles
   |> List.iter (fun role ->
