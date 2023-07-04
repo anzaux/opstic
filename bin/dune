@@ -1,5 +1,4 @@
 (executable
  (name main)
- (libraries opstic)
- (preprocess (pps opstic_ppx))
- )
+ (preprocess
+  (pps opstic_ppx)))

@@ -99,7 +99,7 @@ let register_entrypoint (server : t) ~id ~my_role ~other_roles =
   Hashtbl.replace server.entrypoints spec.entrypoint_id ent;
   ent
 
-let handle_entry server ~entrypoint_id ~role
+let handle_entry server ~entrypoint_id ~path ~role
     ~(kind :
        [ `Greeting
        | `GreetingWithId of conversation_id
@@ -108,6 +108,7 @@ let handle_entry server ~entrypoint_id ~role
   let promise, resolv = ServerIo.create_promise () in
   let request =
     {
+      request_path = path;
       request_body = request;
       request_onerror = (fun err -> resolv (Error err));
     }

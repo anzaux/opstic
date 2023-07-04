@@ -6,8 +6,6 @@ module Server = Server
 module ServerEndpoint = ServerEndpoint
 
 module Mpst_js = struct
-  include Opstic.Make (ServerIo) (ServerEndpoint)
-
   type 'a entrypoint = { witness : 'a; entrypoint : Server.entrypoint }
 
   let handle_request = Server.handle_entry
@@ -25,5 +23,5 @@ module Mpst_js = struct
   let create : 'a entrypoint -> 'a Comm.ep =
    fun ent ->
     let ep = ServerEndpoint.create ent.entrypoint in
-    create ep ent.witness
+    Comm.create ep ent.witness
 end

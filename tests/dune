@@ -1,4 +1,0 @@
-(test
- (name test_direct)
- (modules test_direct)
- (libraries opstic oUnit))

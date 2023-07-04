@@ -35,7 +35,7 @@ let send_to_client t role msg : unit io =
   ConcurrentQueue.enqueue peer.response_queue msg;
   return ()
 
-let receive_from_client t (kind : Opstic.kind) role : payload io =
+let receive_from_client t (kind : Types.kind) role : payload io =
   let* session =
     match kind with
     | `Established -> get_session t
@@ -57,7 +57,7 @@ let receive_from_client t (kind : Opstic.kind) role : payload io =
 
 let send :
     t ->
-    kind:Opstic.kind ->
+    kind:Types.kind ->
     role:string ->
     label:string ->
     payload:payload ->
@@ -68,7 +68,7 @@ let send :
   send_to_client t (Role.create role) payload
 
 let receive :
-    t -> kind:Opstic.kind -> roles:string list -> (string * string * payload) io
+    t -> kind:Types.kind -> roles:string list -> (string * string * payload) io
     =
  fun t ~kind ~roles ->
   match roles with

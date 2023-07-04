@@ -4,7 +4,7 @@ type t
 
 val send :
   t ->
-  kind:Opstic.kind ->
+  kind:Types.kind ->
   role:string ->
   label:string ->
   payload:Types.payload ->
@@ -12,7 +12,7 @@ val send :
 
 val receive :
   t ->
-  kind:Opstic.kind ->
+  kind:Types.kind ->
   roles:string list ->
   (string * string * Types.payload) ServerIo.t
 

@@ -39,6 +39,7 @@ val register_entrypoint :
 val handle_entry :
   t ->
   entrypoint_id:entrypoint_id ->
+  path:string ->
   role:role ->
   kind:
     [ `Greeting
