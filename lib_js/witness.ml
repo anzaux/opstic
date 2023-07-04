@@ -15,12 +15,14 @@ type 'm inp_choice =
 
 type 'a inp = {
   inp_roles : string list;
+  inp_subpath : string;
   inp_choices : (string * string, 'a inp_choice) Hashtbl.t;
   inp_kind : kind;
 }
   constraint 'a = [> ]
 
-let make_inp ?(kind = `Established) (xs : 'm inp_choice list) : 'm inp =
+let make_inp ?(kind = `Established) ~subpath (xs : 'm inp_choice list) : 'm inp
+    =
   let tbl = Hashtbl.create (List.length xs) in
   let rec put_all = function
     | (InpChoice c0 as c) :: xs ->
@@ -41,7 +43,12 @@ let make_inp ?(kind = `Established) (xs : 'm inp_choice list) : 'm inp =
     |> List.map (fun (InpChoice c0) -> c0.inp_choice_role.constr_name)
     |> uniq
   in
-  { inp_roles = roles; inp_kind = kind; inp_choices = tbl }
+  {
+    inp_roles = roles;
+    inp_subpath = subpath;
+    inp_kind = kind;
+    inp_choices = tbl;
+  }
 
 type ('v, 'a) out = {
   out_role : string;

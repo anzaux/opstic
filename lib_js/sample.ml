@@ -15,7 +15,7 @@ end
 let sample1 () =
   let wit_a =
     let open Witness in
-    (Witness.make_inp ~kind:`Greeting
+    (Witness.make_inp ~kind:`Greeting ~subpath:""
        [
          InpChoice
            {
@@ -47,7 +47,7 @@ let sample1 () =
           method lab =
             Witness.make_out ~kind:`Greeting ~role:"a" ~label:"lab"
               ~marshal:(Marshal.to_dyn : int -> payload)
-              (Witness.make_inp
+              (Witness.make_inp ~subpath:""
                  [
                    InpChoice
                      {

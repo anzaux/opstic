@@ -13,6 +13,7 @@ val send :
 val receive :
   t ->
   kind:Types.kind ->
+  subpath:string ->
   roles:string list ->
   (string * string * Types.payload) ServerIo.t
 

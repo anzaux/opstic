@@ -29,32 +29,6 @@ let get_session t =
   | Some session -> return session
   | None -> error_with "Session not established"
 
-let send_to_client t role msg : unit io =
-  let* session = get_session t in
-  let* peer = get_peer session role in
-  ConcurrentQueue.enqueue peer.response_queue msg;
-  return ()
-
-let receive_from_client t (kind : Types.kind) role : payload io =
-  let* session =
-    match kind with
-    | `Established -> get_session t
-    | (`Greeting | `GreetingWithId) as kind -> (
-        match t.session with
-        | Some session ->
-            let* () = Server.accept_greeting kind t.entrypoint session role in
-            return session
-        | None ->
-            let* session =
-              Server.new_session_from_greeting kind t.entrypoint role
-            in
-            t.session <- Some session;
-            return session)
-  in
-  let* peer = get_peer session role in
-  let* req = ConcurrentQueue.dequeue peer.request_queue in
-  return req.request_body
-
 let send :
     t ->
     kind:Types.kind ->
@@ -64,21 +38,54 @@ let send :
     unit io =
  fun t ~kind ~role ~label ~payload ->
   assert (kind = `Established);
+  let* session = get_session t in
   let* payload = t.add_label label payload in
-  send_to_client t (Role.create role) payload
+  let* peer = get_peer session (Role.create role) in
+  ConcurrentQueue.enqueue peer.response_queue payload;
+  return ()
 
 let receive :
-    t -> kind:Types.kind -> roles:string list -> (string * string * payload) io
-    =
- fun t ~kind ~roles ->
-  match roles with
-  | [ role ] ->
-      let* payload = receive_from_client t kind (Role.create role) in
-      let* label = t.get_label payload in
-      return (role, label, payload)
-  | _ ->
-      error_with
-        (Format.asprintf "Multiple roles given: %s" (String.concat "," roles))
+    t ->
+    kind:Types.kind ->
+    subpath:string ->
+    roles:string list ->
+    (string * string * payload) io =
+ fun t ~kind ~subpath ~roles ->
+  let* role =
+    match roles with
+    | [ role ] -> return role
+    | _ ->
+        error_with
+          (Format.asprintf "Multiple roles given: %s" (String.concat "," roles))
+  in
+  let* payload =
+    let role = Role.create role in
+    let* session =
+      match kind with
+      | `Established -> get_session t
+      | (`Greeting | `GreetingWithId) as kind -> (
+          match t.session with
+          | Some session ->
+              let* () = Server.accept_greeting kind t.entrypoint session role in
+              return session
+          | None ->
+              let* session = Server.init_session kind t.entrypoint role in
+              t.session <- Some session;
+              return session)
+    in
+    let* peer = get_peer session role in
+    let* req = ConcurrentQueue.dequeue peer.request_queue in
+    let* () =
+      if req.request_subpath == subpath then return ()
+      else
+        error_with
+          (Format.asprintf "subpath does not match. expected: %s request: %s"
+             subpath req.request_subpath)
+    in
+    return req.request_body
+  in
+  let* label = t.get_label payload in
+  return (role, label, payload)
 
 let msg_closing (session : Server.session) =
   ServerIo.mpst_error

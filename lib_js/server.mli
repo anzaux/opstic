@@ -2,8 +2,16 @@ open! Types
 
 type t
 
+type http_request = {
+  request_subpath : string;
+  request_body : payload;
+  request_onerror : ServerIo.error -> unit;
+}
+
+type http_response = payload
+
 type greeting = {
-  greeting_conversation_id : ConversationId.t option;
+  greeting_subpath : string;
   greeting_request : http_request;
   greeting_response : payload waiting;
 }
@@ -20,11 +28,12 @@ type session = {
 }
 
 and entrypoint = {
-  entrypoint_id : entrypoint_id;
-  my_role : role;
-  other_roles : role list;
-  greeting : (role, greeting_queue) Hashtbl.t;
-  established : (conversation_id, session) Hashtbl.t;
+  entrypoint_id : EntrypointId.t;
+  my_role : Role.t;
+  other_roles : Role.t list;
+  greetings : (Role.t, greeting_queue) Hashtbl.t;
+  sessions : (ConversationId.t, session) Hashtbl.t;
+  unlinked_sessions : (Role.t, ConversationId.t ConcurrentQueue.t) Hashtbl.t;
 }
 
 val create_server : unit -> t
@@ -35,7 +44,7 @@ val register_entrypoint :
 val handle_entry :
   t ->
   entrypoint_id:entrypoint_id ->
-  path:string ->
+  subpath:string ->
   role:role ->
   kind:
     [ `Greeting
@@ -44,7 +53,7 @@ val handle_entry :
   payload ->
   payload ServerIo.t
 
-val new_session_from_greeting :
+val init_session :
   [ `Greeting | `GreetingWithId ] -> entrypoint -> role -> session io
 
 val kill_session : entrypoint -> conversation_id -> ServerIo.error -> unit

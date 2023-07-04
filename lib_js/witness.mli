@@ -15,12 +15,14 @@ type 'm inp_choice =
 
 type 'a inp = {
   inp_roles : string list;
+  inp_subpath : string;
   inp_choices : (string * string, 'a inp_choice) Hashtbl.t;
   inp_kind : kind;
 }
   constraint 'a = [> ]
 
-val make_inp : ?kind:kind -> ([> ] as 'a) inp_choice list -> 'a inp
+val make_inp :
+  ?kind:kind -> subpath:string -> ([> ] as 'a) inp_choice list -> 'a inp
 
 type ('v, 'a) out = {
   out_role : string;

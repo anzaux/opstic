@@ -19,8 +19,8 @@ let receive : 'a inp ep -> 'a ServerIo.t =
  fun ep ->
   let inp = Lin.get ep.ep_witness in
   ServerIo.bind
-    (ServerEndpoint.receive ep.ep_raw ~roles:inp.inp_roles ~kind:inp.inp_kind)
-    (fun (role, label, v) ->
+    (ServerEndpoint.receive ep.ep_raw ~roles:inp.inp_roles ~kind:inp.inp_kind
+       ~subpath:inp.inp_subpath) (fun (role, label, v) ->
       let (InpChoice c) = Hashtbl.find inp.inp_choices (role, label) in
       let v = c.inp_choice_marshal v in
       ServerIo.return
