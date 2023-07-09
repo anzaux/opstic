@@ -1,6 +1,8 @@
 open! Types
 open! ServerIo
 
+type dyn = Dyn.t
+
 let ( let* ) = ServerIo.bind
 
 let hash_find ~descr h k =
@@ -8,41 +10,69 @@ let hash_find ~descr h k =
   | Some x -> return x
   | None -> error_with descr
 
+type path_kind = [ `Greeting | `GreetingWithId | `Established ]
+
+type path_spec = {
+  path : string;
+  path_kind : path_kind;
+  path_role : Role.t;
+  path_request_parse : payload -> (ConversationId.t * string * dyn) option;
+  path_response_unparse : ConversationId.t * string * Dyn.t -> payload;
+}
+
+type entrypoint_spec = {
+  entrypoint_id : EntrypointId.t;
+  path_specs : (string, path_spec) Hashtbl.t;
+  greeting_paths : string list;
+  my_role : Role.t;
+  other_roles : Role.t list;
+}
+
 type http_request = {
-  request_subpath : string;
-  request_body : payload;
+  request_path : string;
+  request_role : Role.t;
+  request_label : string;
+  request_body : dyn;
+  request_body_raw : payload;
   request_onerror : ServerIo.error -> unit;
 }
 
-type http_response = payload
+type http_response = {
+  response_role : Role.t;
+  response_label : string;
+  response_body : Dyn.t;
+  response_body_raw : payload;
+}
 
-type greeting = {
-  greeting_subpath : string;
+type greeting0 = {
   greeting_request : http_request;
   greeting_response : http_response waiting;
 }
 
+type greeting = GreetingWithId of ConversationId.t | Greeting of greeting0
 type greeting_queue = greeting ConcurrentQueue.t
 type request_queue = http_request ConcurrentQueue.t
 type response_queue = http_response ConcurrentQueue.t
-type peer = { request_queue : request_queue; response_queue : response_queue }
+
+type queuepair = {
+  request_queue : request_queue;
+  response_queue : response_queue;
+}
 
 type session = {
-  conversation_id : ConversationId.t;
-  peers : (Role.t, peer) Hashtbl.t;
+  conversation_id : conversation_id;
+  queues : (Role.t, queuepair) Hashtbl.t;
   entrypoint_ref : entrypoint;
 }
 
 and entrypoint = {
-  entrypoint_id : EntrypointId.t;
-  my_role : Role.t;
-  other_roles : Role.t list;
+  spec : entrypoint_spec;
   greetings : (Role.t, greeting_queue) Hashtbl.t;
   sessions : (ConversationId.t, session) Hashtbl.t;
-  unlinked_sessions : (Role.t, ConversationId.t ConcurrentQueue.t) Hashtbl.t;
+  server_ref : t;
 }
 
-type t = { entrypoints : (EntrypointId.t, entrypoint) Hashtbl.t }
+and t = { entrypoints : (EntrypointId.t, entrypoint) Hashtbl.t }
 
 module Util = struct
   let get_entrypoint t entrypoint_id =
@@ -50,21 +80,11 @@ module Util = struct
       ~descr:
         (Format.asprintf "No entry point: %a" EntrypointId.pp entrypoint_id)
 
-  let get_unlinked_sessions_ entrypoint role =
-    hash_find entrypoint.unlinked_sessions role
-      ~descr:
-        (Format.asprintf "Entrypoint %a Role %a is not accepting session"
-           EntrypointId.pp entrypoint.entrypoint_id Role.pp role)
-
-  let get_unlinked_sessions t entrypoint_id role =
-    let* entrypoint = get_entrypoint t entrypoint_id in
-    get_unlinked_sessions_ entrypoint role
-
   let get_greeting_queue_ entrypoint role =
     hash_find entrypoint.greetings role
       ~descr:
         (Format.asprintf "Entrypoint %a Role %a is not accepting peer"
-           EntrypointId.pp entrypoint.entrypoint_id Role.pp role)
+           EntrypointId.pp entrypoint.spec.entrypoint_id Role.pp role)
 
   let get_greeting_queue t entrypoint_id role =
     let* entrypoint = get_entrypoint t entrypoint_id in
@@ -77,296 +97,151 @@ module Util = struct
         (Format.asprintf "No session id %a for entrypoint %a" ConversationId.pp
            conversation_id EntrypointId.pp entrypoint_id)
 
-  let get_peer_ session role =
+  let get_queuepair_ session role =
     (* let* session = get_session t entrypoint_id conversation_id in *)
-    hash_find session.peers role
+    hash_find session.queues role
       ~descr:
         (Format.asprintf "No role %a for conversation %a (entrypoint %a)"
            Role.pp role ConversationId.pp session.conversation_id
-           EntrypointId.pp session.entrypoint_ref.entrypoint_id)
+           EntrypointId.pp session.entrypoint_ref.spec.entrypoint_id)
 
-  let get_peer t entrypoint_id conversation_id role =
+  let get_queuepair t entrypoint_id conversation_id role =
     let* session = get_session t entrypoint_id conversation_id in
-    get_peer_ session role
+    get_queuepair_ session role
 
-  let dequeue_greeting entrypoint role =
-    let* greeting_queue = get_greeting_queue_ entrypoint role in
-    ConcurrentQueue.dequeue greeting_queue
-
-  let enqueue_greeting session role greeting =
-    let* peer = get_peer_ session role in
-    ConcurrentQueue.enqueue peer.request_queue greeting.greeting_request;
-    ConcurrentQueue.add_waiter peer.response_queue greeting.greeting_response;
-    return ()
+  (* let dequeue_greeting entrypoint role =
+     let* greeting_queue = get_greeting_queue_ entrypoint role in
+     ConcurrentQueue.dequeue greeting_queue *)
 end
 
 let create_server () : t = { entrypoints = Hashtbl.create 42 }
 
-let register_entrypoint (server : t) ~id ~my_role ~other_roles =
+let register_entrypoint (server : t) ~spec =
   let ent =
     {
-      entrypoint_id = id;
-      my_role;
-      other_roles;
+      spec;
       greetings = Hashtbl.create 42;
       sessions = Hashtbl.create 42;
-      unlinked_sessions = Hashtbl.create 42;
+      server_ref = server;
     }
   in
   let register ent role =
     Hashtbl.replace ent.greetings role (ConcurrentQueue.create ())
   in
-  List.iter (register ent) other_roles;
-  Hashtbl.replace server.entrypoints id ent;
+  spec.other_roles |> List.iter (register ent);
+  Hashtbl.replace server.entrypoints spec.entrypoint_id ent;
   ent
 
 let create_session entrypoint conversation_id =
-  let roles = entrypoint.other_roles in
-  let peers = Hashtbl.create (List.length roles) in
+  let roles = entrypoint.spec.other_roles in
+  let queues = Hashtbl.create (List.length roles) in
   roles
   |> List.iter (fun role ->
-         Hashtbl.replace peers role
+         Hashtbl.replace queues role
            {
              request_queue = ConcurrentQueue.create ();
              response_queue = ConcurrentQueue.create ();
            });
-  { conversation_id; peers; entrypoint_ref = entrypoint }
+  { conversation_id; queues; entrypoint_ref = entrypoint }
 
 let new_session entrypoint conversation_id =
   let session = create_session entrypoint conversation_id in
   Hashtbl.replace entrypoint.sessions conversation_id session;
   session
 
-let handle_entry server ~entrypoint_id ~subpath ~role
-    ~(kind :
-       [ `Greeting
-       | `GreetingWithId of conversation_id
-       | `Established of conversation_id ]) (request : payload) :
-    http_response io =
+let handle_entry server ~entrypoint_id ~path (request : payload) : payload io =
   let promise, resolv = ServerIo.create_promise () in
+  let resolv = function
+    | Ok response -> resolv (Ok response.response_body_raw)
+    | Error err -> resolv (Error err)
+  in
+  let* entrypoint = Util.get_entrypoint server entrypoint_id in
+  let path_spec = Hashtbl.find entrypoint.spec.path_specs path in
+  let conversation_id, label, payload =
+    match path_spec.path_request_parse request with
+    | Some (conversation_id, label, payload) -> (conversation_id, label, payload)
+    | None -> assert false
+  in
+  let role = path_spec.path_role in
   let request =
     {
-      request_subpath = subpath;
-      request_body = request;
+      request_path = path;
+      request_role = role;
+      request_label = label;
+      request_body = payload;
+      request_body_raw = request;
       request_onerror = (fun err -> resolv (Error err));
     }
   in
-  match kind with
-  | `GreetingWithId conversation_id ->
-      let* () =
-        let* entrypoint = Util.get_entrypoint server entrypoint_id in
-        let (_ : session) = new_session entrypoint conversation_id in
-        return ()
+  match path_spec.path_kind with
+  | `Established ->
+      let* peer =
+        Util.get_queuepair server entrypoint_id conversation_id role
       in
-      let* () =
-        let* peer = Util.get_peer server entrypoint_id conversation_id role in
-        ConcurrentQueue.enqueue peer.request_queue request;
-        ConcurrentQueue.add_waiter peer.response_queue resolv;
-        return ()
-      in
-      let* () =
-        let* queue = Util.get_unlinked_sessions server entrypoint_id role in
-        ConcurrentQueue.enqueue queue conversation_id;
-        return ()
-      in
-      promise
-  | `Established conversation_id ->
-      let* peer = Util.get_peer server entrypoint_id conversation_id role in
       ConcurrentQueue.enqueue peer.request_queue request;
       ConcurrentQueue.add_waiter peer.response_queue resolv;
       promise
   | `Greeting ->
       let* queue = Util.get_greeting_queue server entrypoint_id role in
       ConcurrentQueue.enqueue queue
-        {
-          greeting_subpath = subpath;
-          greeting_request = request;
-          greeting_response = resolv;
-        };
+        (Greeting { greeting_request = request; greeting_response = resolv });
       promise
+  | `GreetingWithId ->
+      let* () =
+        let (_ : session) = new_session entrypoint conversation_id in
+        return ()
+      in
+      let* () =
+        let* peer =
+          Util.get_queuepair server entrypoint_id conversation_id role
+        in
+        ConcurrentQueue.enqueue peer.request_queue request;
+        ConcurrentQueue.add_waiter peer.response_queue resolv;
+        return ()
+      in
+      let* () =
+        let* queue = Util.get_greeting_queue server entrypoint_id role in
+        ConcurrentQueue.enqueue queue (GreetingWithId conversation_id);
+        return ()
+      in
+      promise
+
+let kill_session_ session err =
+  Hashtbl.remove session.entrypoint_ref.sessions session.conversation_id;
+  session.queues
+  |> Hashtbl.iter (fun _ peer ->
+         ConcurrentQueue.kill peer.request_queue err;
+         ConcurrentQueue.kill peer.response_queue err)
 
 let kill_session entrypoint conversation_id err =
   match Hashtbl.find_opt entrypoint.sessions conversation_id with
   | None -> ()
-  | Some session ->
-      Hashtbl.remove entrypoint.sessions conversation_id;
-      session.peers
-      |> Hashtbl.iter (fun _ peer ->
-             ConcurrentQueue.kill peer.request_queue err;
-             ConcurrentQueue.kill peer.response_queue err)
-
-let accept_greeting (kind : [ `Greeting | `GreetingWithId ]) entrypoint session
-    role : unit io =
-  if kind = `GreetingWithId then Kxclib.Log0.warn "";
-  let* greeting = Util.dequeue_greeting entrypoint role in
-  Util.enqueue_greeting session role greeting
+  | Some session -> kill_session_ session err
 
 let fresh_conversation_id () =
   ConversationId.create (Int64.to_string (Random.bits64 ()))
 
-let init_session (kind : [ `Greeting | `GreetingWithId ]) entrypoint role :
-    session io =
-  match kind with
-  | `Greeting ->
+let enqueue_greeting session role greeting =
+  let* peer = Util.get_queuepair_ session role in
+  ConcurrentQueue.enqueue peer.request_queue greeting.greeting_request;
+  ConcurrentQueue.add_waiter peer.response_queue greeting.greeting_response;
+  return ()
+
+let init_session entrypoint : session io =
+  let queues =
+    entrypoint.spec.greeting_paths
+    |> List.map (fun path ->
+           let spec = Hashtbl.find entrypoint.spec.path_specs path in
+           Hashtbl.find entrypoint.greetings spec.path_role)
+  in
+  let* greeting = ConcurrentQueue.dequeue_one_of queues in
+  match greeting with
+  | Greeting greeting ->
+      let role = greeting.greeting_request.request_role in
       let conversation_id = fresh_conversation_id () in
-      let* greeting = Util.dequeue_greeting entrypoint role in
       let session = new_session entrypoint conversation_id in
-      let* () = Util.enqueue_greeting session role greeting in
+      let* () = enqueue_greeting session role greeting in
       return session
-  | `GreetingWithId -> assert false
-(* let* conversation_id = ConcurrentQueue.dequeue *)
-
-(* module Mpst = struct
-     let _create_http_session ~conversation_id ~role ~(request_count : int)
-         ?(request_queue = ConcurrentQueue.create ())
-         ?(response_queue = ConcurrentQueue.create ()) () =
-       {
-         conversation_id;
-         role;
-         request_queue;
-         response_queue;
-         request_count;
-         http_session_id = SessionId.create (Int64.to_string @@ Random.bits64 ());
-       }
-
-     let _establish_new_session server ~conversation_id ~role new_conn =
-       let newsession =
-         let request_queue = ConcurrentQueue.create ()
-         and response_queue = ConcurrentQueue.create () in
-         ConcurrentQueue.enqueue request_queue new_conn.http_request;
-         ConcurrentQueue.add_waiter response_queue new_conn.http_response_waiting;
-         _create_http_session ~conversation_id ~role ~request_queue ~response_queue
-           ~request_count:1 ()
-       in
-       Hashtbl.replace server.established_sessions newsession.http_session_id
-         newsession;
-       (conversation_id, role, newsession.http_session_id)
-
-     let rec accept_initial server ~entrypoint_id
-         ~(kind : [ `AsLeader | `AsFollower ]) ~roles :
-         (conversation_id * role * http_session_id) io =
-       let* queue = Util.get_initial_queue server ~entrypoint_id in
-       let* newconn = ConcurrentQueue.dequeue queue in
-       handle_error ~handler:(fun err ->
-           (* wait for next connection if error *)
-           newconn.http_response_waiting (Error err);
-           accept_initial server ~entrypoint_id ~kind ~roles)
-       @@
-       let role = newconn.incoming.incoming_role in
-       let* () =
-         if List.mem role roles then return ()
-         else error_with (Format.asprintf "Role %a is not accepted" Role.pp role)
-       in
-       match kind with
-       | `AsLeader ->
-           let new_conversation_id =
-             ConversationId.create (Int64.to_string @@ Random.bits64 ())
-           in
-           return
-           @@ _establish_new_session server ~conversation_id:new_conversation_id
-                ~role:newconn.incoming.incoming_role newconn
-       | `AsFollower ->
-           let* conversation_id =
-             option_get newconn.incoming.incoming_conversation_id
-               ~descr:"No conversation_id given"
-           in
-           return
-           @@ _establish_new_session server ~role:newconn.incoming.incoming_role
-                ~conversation_id newconn
-
-     let rec accept_join server ~entrypoint_id ~role ~conversation_id
-         ~(kind : [ `Fresh | `Correlation ]) : http_request io =
-       let retry_if_error newconn f =
-         handle_error
-           ~handler:(fun err ->
-             (* wait for next connection if error *)
-             newconn.http_response_waiting (Error err);
-             accept_join server ~entrypoint_id ~role ~conversation_id ~kind)
-           (f ())
-       in
-       match kind with
-       | `Fresh ->
-           let* queue = Util.get_fresh_join_queue server ~entrypoint_id ~role in
-           let* newconn = ConcurrentQueue.dequeue queue in
-           retry_if_error newconn @@ fun () ->
-           let conversation_id', role', _http_session_id =
-             _establish_new_session server ~conversation_id ~role newconn
-           in
-           assert (conversation_id = conversation_id');
-           assert (role = role');
-           return newconn.http_request
-       | `Correlation ->
-           let* queue =
-             Util.get_correlation_join_queue server ~entrypoint_id ~role
-               ~conversation_id
-           in
-           let* newconn = ConcurrentQueue.dequeue queue in
-           retry_if_error newconn @@ fun () ->
-           let conversation_id', role', _http_session_id =
-             _establish_new_session server ~conversation_id ~role newconn
-           in
-           assert (conversation_id = conversation_id');
-           assert (role = role');
-           return newconn.http_request
-
-     let receive_from_client server ~http_session_id : http_request io =
-       let* session =
-         hash_find server.established_sessions http_session_id
-           ~descr:
-             (Format.asprintf "receive_from_client: http session id not found: %a"
-                SessionId.pp http_session_id)
-       in
-       ConcurrentQueue.dequeue session.request_queue
-
-     let send_to_client server ~http_session_id (msg : http_response) : unit io =
-       let* session =
-         try return @@ Hashtbl.find server.established_sessions http_session_id
-         with Not_found ->
-           error_with
-             (Format.asprintf "send_to_client: http session id not found: %a"
-                SessionId.pp http_session_id)
-       in
-       ConcurrentQueue.enqueue session.response_queue msg;
-       return ()
-   end *)
-
-(* open! Kxclib
-
-   let handle_request (server : t) (request : Json.jv) : Json.jv ServerIo.t =
-     let open ServerIo in
-     let ( let* ) = ServerIo.bind in
-     let ( let+ ) m f = ServerIo.map f m in
-     let access fld msg =
-       match Jv.access [ `f fld ] request with
-       | Some (`str x) -> return x
-       | _ -> error_with msg
-     in
-     let* entrypoint_id =
-       access "entrypoint" "entrypoint not given" |> map EntrypointId.create
-     in
-     let* role = access "role" "role not given" |> map Role.create in
-     let conversation_id () =
-       access "conversation_id" "conversation_id not given"
-       |> map ConversationId.create
-     in
-     let http_session_id () =
-       access "session_id" "session_id not given" |> map SessionId.create
-     in
-     let* mode_str = access "mode" "mode not given" in
-     let* entrypoint_kind =
-       let open Handler in
-       match mode_str with
-       | "start" -> return (StartLeader role)
-       | "start_follower" ->
-           let+ conversation_id = conversation_id () in
-           StartFollower (role, conversation_id)
-       | "join" -> return (Join role)
-       | "join_correlation" ->
-           let+ conversation_id = conversation_id () in
-           JoinCorrelation (role, conversation_id)
-       | "session" ->
-           let+ http_session_id = http_session_id () in
-           InSession http_session_id
-       | _ -> error_with (Format.asprintf "wrong mode: %s" mode_str)
-     in
-     Handler.handle_entry server ~entrypoint_id ~entrypoint_kind ~request *)
+  | GreetingWithId conversation_id ->
+      Util.get_session entrypoint.server_ref entrypoint.spec.entrypoint_id
+        conversation_id

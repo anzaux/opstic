@@ -13,6 +13,11 @@ let map f m = Fut.map (function Error e -> Error e | Ok x -> Ok (f x)) m
 let create_promise = Fut.create
 let error err = Fut.error err
 
+let rec mapM f = function
+  | x :: xs ->
+      bind (f x) (fun y -> bind (mapM f xs) (fun ys -> return (y :: ys)))
+  | [] -> return []
+
 let mpst_error msg =
   let open Prr in
   Jv.Error.v ~name:(Jstr.v "OpsticError") (Jstr.v msg)

@@ -1,4 +1,4 @@
-type 'x io = 'x ServerIo.t
+(* type 'x io = 'x ServerIo.t
 type payload = Types.payload
 type t
 
@@ -23,4 +23,4 @@ val create :
   ?get_label:(payload -> string io) ->
   ?add_label:(string -> payload -> payload io) ->
   Server.entrypoint ->
-  t
+  t *)
