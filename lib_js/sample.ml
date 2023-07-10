@@ -18,25 +18,25 @@ let sample1 () =
     (Lazy.from_val
      @@ Inp
           [
-            ( "b",
+            ( Role.create "b",
               InpRole
                 {
-                  inp_role_constr = b;
-                  inp_role_path = "";
-                  inp_role_path_kind = `Greeting;
-                  inp_role_parse_label = assert false;
-                  inp_role_labels =
+                  role_constr = b;
+                  path = "";
+                  path_kind = `Greeting;
+                  parse_label = assert false;
+                  labels =
                     [
                       ( "lab",
                         InpLabel
                           {
-                            inp_label_constr = lab;
-                            inp_label_parse_payload = assert false;
-                            inp_label_cont =
+                            label_constr = lab;
+                            parse_payload = assert false;
+                            cont =
                               Lazy.from_val
                                 (Out
                                    {
-                                     methods =
+                                     labels =
                                        [
                                          Method
                                            {
@@ -55,7 +55,7 @@ let sample1 () =
                                            object
                                              method lab2 =
                                                {
-                                                 out_role = "b";
+                                                 out_role = Role.create "b";
                                                  out_label = "lab2";
                                                  out_marshal = assert false;
                                                  out_cont = Lazy.from_val Close;
@@ -63,7 +63,7 @@ let sample1 () =
 
                                              method lab3 =
                                                {
-                                                 out_role = "b";
+                                                 out_role = Role.create "b";
                                                  out_label = "lab3";
                                                  out_marshal = assert false;
                                                  out_cont = Lazy.from_val Close;

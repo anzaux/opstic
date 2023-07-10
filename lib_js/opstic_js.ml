@@ -5,13 +5,13 @@ module ConcurrentQueue = ConcurrentQueue
 module Server = Server
 
 module Mpst_js = struct
-  type 'a entrypoint = { witness : 'a; entrypoint : Server.entrypoint }
+  type 'a service = { witness : 'a; service : Server.service }
 
   let handle_request = Server.handle_entry
   let create_server = Server.create_server
 
-  (* let register_entrypoint t ~(witness : 'a) ~id ~my_role ~other_roles :
-       'a entrypoint =
+  (* let register_service t ~(witness : 'a) ~id ~my_role ~other_roles :
+       'a service =
      let spec =
        Server.
          {
@@ -20,6 +20,6 @@ module Mpst_js = struct
            other_roles = List.map Role.create other_roles;
          }
      in
-     let s_entrypoint = Server.register_entrypoint t ~spec in
-     { witness; entrypoint = s_entrypoint } *)
+     let s_service = Server.register_service t ~spec in
+     { witness; service = s_service } *)
 end
