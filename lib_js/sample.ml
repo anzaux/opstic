@@ -15,86 +15,67 @@ end
 let sample1 () =
   let wit_a =
     let open Witness in
-    Inp
-      (Witness.make_inp ~kind:`Greeting ~subpath:""
-         [
-           InpChoice
-             {
-               inp_choice_role = b;
-               inp_choice_label = lab;
-               inp_choice_next_wit =
-                 Out
-                   {
-                     methods =
-                       [
-                         Method
-                           {
-                             role = (fun obj -> obj#b);
-                             label = (fun obj -> obj#lab2);
-                           };
-                         Method
-                           {
-                             role = (fun obj -> obj#b);
-                             label = (fun obj -> obj#lab3);
-                           };
-                       ];
-                     obj =
-                       object
-                         method b =
-                           object
-                             method lab2 =
-                               Witness.make_out ~role:"b" ~label:"lab2"
-                                 ~marshal:Marshal.to_dyn Close
+    (Lazy.from_val
+     @@ Inp
+          [
+            ( "b",
+              InpRole
+                {
+                  inp_role_constr = b;
+                  inp_role_path = "";
+                  inp_role_path_kind = `Greeting;
+                  inp_role_parse_label = assert false;
+                  inp_role_labels =
+                    [
+                      ( "lab",
+                        InpLabel
+                          {
+                            inp_label_constr = lab;
+                            inp_label_parse_payload = assert false;
+                            inp_label_cont =
+                              Lazy.from_val
+                                (Out
+                                   {
+                                     methods =
+                                       [
+                                         Method
+                                           {
+                                             role = (fun x -> x#b);
+                                             label = (fun x -> x#lab2);
+                                           };
+                                         Method
+                                           {
+                                             role = (fun x -> x#b);
+                                             label = (fun x -> x#lab3);
+                                           };
+                                       ];
+                                     obj =
+                                       object
+                                         method b =
+                                           object
+                                             method lab2 =
+                                               {
+                                                 out_role = "b";
+                                                 out_label = "lab2";
+                                                 out_marshal = assert false;
+                                                 out_cont = Lazy.from_val Close;
+                                               }
 
-                             method lab3 =
-                               Witness.make_out ~role:"b" ~label:"lab3"
-                                 ~marshal:Marshal.to_dyn Close
-                           end
-                       end;
-                   };
-               inp_choice_marshal = Marshal.from_dyn;
-             };
-         ]
-        : [< `b of _ ] inp)
+                                             method lab3 =
+                                               {
+                                                 out_role = "b";
+                                                 out_label = "lab3";
+                                                 out_marshal = assert false;
+                                                 out_cont = Lazy.from_val Close;
+                                               }
+                                           end
+                                       end;
+                                   });
+                          } );
+                    ];
+                } );
+          ]
+      : [< `b of [< `lab of _ ] ] inp witness lazy_t)
     (* NB this type annotation is mandatory for session-type safety *)
-  and wit_b =
-    let open Witness in
-    Out
-      {
-        methods =
-          [ Method { role = (fun obj -> obj#a); label = (fun obj -> obj#lab) } ];
-        obj =
-          object
-            method a =
-              object
-                method lab =
-                  Witness.make_out ~kind:`Greeting ~role:"a" ~label:"lab"
-                    ~marshal:(Marshal.to_dyn : int -> payload)
-                    (Inp
-                       (Witness.make_inp ~subpath:""
-                          [
-                            InpChoice
-                              {
-                                inp_choice_role =
-                                  (a : ([< `a of _ ], _) Rows.constr);
-                                inp_choice_label = lab2;
-                                inp_choice_next_wit = Close;
-                                inp_choice_marshal =
-                                  (Marshal.from_dyn : payload -> unit);
-                              };
-                            InpChoice
-                              {
-                                inp_choice_role =
-                                  (a : ([< `a of _ ], _) Rows.constr);
-                                inp_choice_label = lab3;
-                                inp_choice_next_wit = Close;
-                                inp_choice_marshal =
-                                  (Marshal.from_dyn : payload -> unit);
-                              };
-                          ]
-                         : [< `a of _ ] inp))
-              end
-          end;
-      }
   in
-  (wit_a, wit_b)
+  wit_a

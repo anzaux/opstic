@@ -4,14 +4,12 @@ type 'a ok_or_error = ('a, ServerIo.error) result
 type 'a waiting = 'a ok_or_error -> unit
 type payload = Json.jv
 
-module ConversationId = Id.Make ()
 module SessionId = Id.Make ()
-module EntrypointId = Id.Make ()
+module ServiceId = Id.Make ()
 module Role = Id.Make ()
 
-type kind = [ `Greeting | `GreetingWithId | `Established ]
-type http_session_id = SessionId.t [@@deriving show]
-type conversation_id = ConversationId.t [@@deriving show]
-type entrypoint_id = EntrypointId.t [@@deriving show]
+type path_kind = [ `Greeting | `GreetingWithId | `Established ]
+type session_id = SessionId.t [@@deriving show]
+type service_id = ServiceId.t [@@deriving show]
 type role = Role.t [@@deriving show]
 type 'a io = 'a ServerIo.t
