@@ -1,6 +1,6 @@
 open! Kxclib
 
-type 'a ok_or_error = ('a, ServerIo.error) result
+type 'a ok_or_error = ('a, Monad.error) result
 type 'a waiting = 'a ok_or_error -> unit
 type payload = Json.jv
 
@@ -12,4 +12,4 @@ type path_kind = [ `Greeting | `GreetingWithId | `Established ]
 type session_id = SessionId.t [@@deriving show]
 type service_id = ServiceId.t [@@deriving show]
 type role = Role.t [@@deriving show]
-type 'a io = 'a ServerIo.t
+type 'a io = 'a Monad.t

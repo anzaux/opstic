@@ -1,6 +1,6 @@
 open! Kxclib
 include Types
-module ServerIo = ServerIo
+module Monad = Monad
 module ConcurrentQueue = ConcurrentQueue
 module Server = Server
 

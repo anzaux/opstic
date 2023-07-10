@@ -1,8 +1,8 @@
 open! Kxclib
 
-exception QueueKilled of ServerIo.error
+exception QueueKilled of Monad.error
 
-type 'a ok_or_error = ('a, ServerIo.error) result
+type 'a ok_or_error = ('a, Monad.error) result
 type 'a waiting = 'a ok_or_error -> unit
 type 'a maybe_waiting = 'a waiting option
 
@@ -15,11 +15,11 @@ type 'a _t =
      NB: The waiter (reference cell) is possibly shared among queues (for `dequeue_one_of`).
      Once invoked, the waiter cell is set to None, to prevent being called again *)
   | EmptyWaiting of 'a maybe_waiting ref queue (* |q| > 0 *)
-  | Killed of ServerIo.error
+  | Killed of Monad.error
 
 type 'a t = 'a _t ref
 
-let return = ServerIo.return
+let return = Monad.return
 let create () = ref EmptyNotWaiting
 
 (* Dequeue a waiter if any. *)
@@ -60,7 +60,7 @@ let dequeue t =
   match !t with
   | EmptyNotWaiting | EmptyWaiting _ ->
       (* (1) The queue is empty. Make a promise for the dequeue, and *)
-      let promise, resolv_f = ServerIo.create_promise () in
+      let promise, resolv_f = Monad.create_promise () in
       (* Set up the internal queue for resolve functions *)
       let resq = match !t with EmptyWaiting q -> q | _ -> Queue.empty in
       (* Update the state by enqueuing the resolve function *)
@@ -102,7 +102,7 @@ let add_shared_waiter t shared_resolv_f =
 let add_waiter t resolv_f = add_shared_waiter t (ref (Some resolv_f))
 
 let dequeue_one_of ts =
-  let promise, resolv_f = ServerIo.create_promise () in
+  let promise, resolv_f = Monad.create_promise () in
   let shared_resolv_f = ref (Some resolv_f) in
   List.iter (fun t -> add_shared_waiter t shared_resolv_f) ts;
   promise

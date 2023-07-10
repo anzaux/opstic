@@ -22,7 +22,7 @@ type http_request = {
   request_path : string;
   request_role : Role.t;
   request_body : payload;
-  request_onerror : ServerIo.error -> unit;
+  request_onerror : Monad.error -> unit;
 }
 
 type http_response = { response_role : Role.t; response_body : payload }
@@ -66,21 +66,21 @@ val handle_entry :
   payload Types.io
 
 val init_session : entrypoint -> session io
-val kill_session_ : session -> ServerIo.error -> unit
-val kill_session : entrypoint -> session_id -> ServerIo.error -> unit
+val kill_session_ : session -> Monad.error -> unit
+val kill_session : entrypoint -> session_id -> Monad.error -> unit
 
 (* val accept_greeting :
    [ `Greeting | `GreetingWithId ] -> entrypoint -> session -> role -> unit io *)
 
 module Util : sig
-  val get_entrypoint : t -> service_id -> entrypoint ServerIo.t
+  val get_entrypoint : t -> service_id -> entrypoint Monad.t
 
   val get_greeting_queue :
-    t -> service_id -> role -> greeting_queue ServerIo.t
+    t -> service_id -> role -> greeting_queue Monad.t
 
-  val get_session : t -> service_id -> session_id -> session ServerIo.t
-  val get_queuepair_ : session -> role -> queuepair ServerIo.t
+  val get_session : t -> service_id -> session_id -> session Monad.t
+  val get_queuepair_ : session -> role -> queuepair Monad.t
 
   val get_queuepair :
-    t -> service_id -> session_id -> role -> queuepair ServerIo.t
+    t -> service_id -> session_id -> role -> queuepair Monad.t
 end

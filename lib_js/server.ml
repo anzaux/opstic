@@ -1,7 +1,7 @@
 open! Types
-open! ServerIo
+open! Monad
 
-let ( let* ) = ServerIo.bind
+let ( let* ) = Monad.bind
 
 let hash_find ~descr h k =
   match Hashtbl.find_opt h k with
@@ -29,7 +29,7 @@ type http_request = {
   request_path : string;
   request_role : Role.t;
   request_body : payload;
-  request_onerror : ServerIo.error -> unit;
+  request_onerror : Monad.error -> unit;
 }
 
 type http_response = { response_role : Role.t; response_body : payload }
@@ -140,7 +140,7 @@ let new_session entrypoint session_id =
   session
 
 let handle_entry server ~service_id ~path (request : payload) : payload io =
-  let promise, resolv = ServerIo.create_promise () in
+  let promise, resolv = Monad.create_promise () in
   let resolv = function
     | Ok response -> resolv (Ok response.response_body)
     | Error err -> resolv (Error err)
