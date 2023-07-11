@@ -1,4 +1,5 @@
 open Types
+open Server
 
 type nonrec payload = payload
 type 'a ep = { ep_raw : Server.session; ep_witness : 'a Lin.t }
@@ -42,12 +43,31 @@ and 'a witness =
   | Inp : 'a inp -> 'a inp witness
   | Close : unit witness
 
+type 'a service = { sv_spec : Server.service_spec; sv_witness : 'a witness }
+
+let parse_label_default payload =
+  match Kxclib.Jv.pump_field "label" payload with
+  | `obj (("label", `str lab) :: _) -> lab
+  | _ -> failwith "no label"
+
+let parse_sessionid_default payload =
+  match Kxclib.Jv.pump_field "session_id" payload with
+  | `obj (("session_id", `str lab) :: _) -> lab
+  | _ -> failwith "no label"
+
 let make_inp_label ~constr ~label_constr cont =
   InpLabel { label_constr = constr; parse_payload = label_constr; cont }
 
-let make_inp_role ?(path_kind = `Established) ~path ~constr ~parse_label labels
-    =
+let make_inp_role ?(path_kind = `Established)
+    ?(parse_label = parse_label_default) ~path ~constr labels =
   InpRole { path_kind; path; role_constr = constr; parse_label; labels }
+
+let make_inp inproles : 'a inp witness =
+  Inp
+    (List.map
+       (fun (InpRole inprole as i) ->
+         (Role.create inprole.role_constr.constr_name, i))
+       inproles)
 
 type visited = string list (* paths *)
 
@@ -91,10 +111,40 @@ and to_pathspec_aux :
 
 let to_pathspec x = to_pathspec_aux [] (Lazy.from_val x)
 
-(* let get_label_default payload =
-   match Kxclib.Jv.pump_field "label" payload with
-   | `obj (("label", `str lab) :: _) -> lab
-   | _ -> failwith "no label" *)
+let create_service :
+    ?parse_session_id:(payload -> string) ->
+    id:string ->
+    my_role:string ->
+    other_roles:string list ->
+    'a witness ->
+    'a service =
+ fun ?(parse_session_id = parse_sessionid_default) ~id ~my_role ~other_roles
+     witness ->
+  let my_role = Role.create my_role in
+  let other_roles = List.map Role.create other_roles in
+  let path_specs0 = to_pathspec witness in
+  let path_specs = Hashtbl.create 42 in
+  path_specs0
+  |> List.iter (fun path_spec ->
+         Hashtbl.replace path_specs path_spec.path path_spec);
+  let greeting_paths =
+    path_specs0
+    |> List.filter_map (fun path_spec ->
+           if path_spec.path_kind = `Established then None
+           else Some path_spec.path)
+  in
+  let spec =
+    {
+      service_id = ServiceId.create id;
+      path_specs;
+      greeting_paths;
+      my_role;
+      other_roles;
+      parse_session_id =
+        (fun payload -> SessionId.create (parse_session_id payload));
+    }
+  in
+  { sv_spec = spec; sv_witness = witness }
 
 let make_out ~role ~label ~marshal next =
   { out_role = role; out_label = label; out_marshal = marshal; out_cont = next }

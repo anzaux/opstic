@@ -41,7 +41,17 @@ and 'a witness =
   | Inp : 'a inp -> 'a inp witness
   | Close : unit witness
 
+type 'a service = { sv_spec : Server.service_spec; sv_witness : 'a witness }
+
 val to_pathspec : 'a witness -> Server.path_spec list
+
+val create_service :
+  ?parse_session_id:(payload -> string) ->
+  id:string ->
+  my_role:string ->
+  other_roles:string list ->
+  'a witness ->
+  'a service
 
 val make_inp_label :
   constr:('a, 'b * 'c ep) Rows.constr ->
@@ -50,12 +60,14 @@ val make_inp_label :
   'a inp_label
 
 val make_inp_role :
-  ?path_kind:Types.path_kind ->
+  ?path_kind:path_kind ->
+  ?parse_label:(payload -> string) ->
   path:string ->
-  constr:('b, 'c) Rows.constr ->
-  parse_label:(Types.payload -> string) ->
-  (string * 'c inp_label) list ->
-  'b inp_role
+  constr:('a, 'b) Rows.constr ->
+  (string * 'b inp_label) list ->
+  'a inp_role
+
+val make_inp : 'a inp_role list -> 'a inp witness
 
 val make_out :
   role:Role.t ->

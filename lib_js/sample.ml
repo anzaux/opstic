@@ -78,4 +78,5 @@ let sample1 () =
       : [< `b of [< `lab of _ ] ] inp witness lazy_t)
     (* NB this type annotation is mandatory for session-type safety *)
   in
-  wit_a
+  Witness.create_service ~id:"sample0" ~my_role:"a" ~other_roles:[ "b" ]
+    (Lazy.force wit_a)

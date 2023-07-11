@@ -16,7 +16,7 @@ type service_spec = {
   greeting_paths : string list;
   my_role : Role.t;
   other_roles : Role.t list;
-  get_converssation_id : payload -> SessionId.t;
+  parse_session_id : payload -> SessionId.t;
 }
 
 type http_request = {
@@ -84,7 +84,7 @@ module Util = struct
     (* let* session = get_session t service_id session_id in *)
     hash_find session.queues role
       ~descr:
-        (Format.asprintf "No role %a for conversation %a (service %a)"
+        (Format.asprintf "No role %a for session %a (service %a)"
            Role.pp role SessionId.pp session.session_id ServiceId.pp
            session.service_ref.spec.service_id)
 
@@ -141,7 +141,7 @@ let handle_entry server ~service_id ~path (request : payload) : payload io =
   let* service = Util.get_service server service_id in
   let path_spec = Hashtbl.find service.spec.path_specs path in
   let role = path_spec.path_role in
-  let session_id = service.spec.get_converssation_id request in
+  let session_id = service.spec.parse_session_id request in
   let request =
     {
       request_path = path;

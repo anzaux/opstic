@@ -1,16 +1,15 @@
 open! Types
 
 type t
-
 type path_spec = { path : string; path_kind : path_kind; path_role : Role.t }
 
-and service_spec = {
+type service_spec = {
   service_id : ServiceId.t;
   path_specs : (string, path_spec) Hashtbl.t;
   greeting_paths : string list;
   my_role : Role.t;
   other_roles : Role.t list;
-  get_converssation_id : payload -> SessionId.t;
+  parse_session_id : payload -> SessionId.t;
 }
 
 type http_request = {
@@ -31,11 +30,7 @@ type greeting = GreetingWithId of SessionId.t | Greeting of greeting0
 type greeting_queue = greeting ConcurrentQueue.t
 type request_queue = http_request ConcurrentQueue.t
 type response_queue = http_response ConcurrentQueue.t
-
-type queue = {
-  request_queue : request_queue;
-  response_queue : response_queue;
-}
+type queue = { request_queue : request_queue; response_queue : response_queue }
 
 type session = {
   session_id : session_id;
