@@ -4,7 +4,11 @@ exception QueueKilled of Monad.error
 
 type 'a ok_or_error = ('a, Monad.error) result
 type 'a waiting = 'a ok_or_error -> unit
-type 'a maybe_waiting = 'a waiting option
+
+type 'a waiter = {
+  mutable waiter : 'a waiting option;
+  invalidate : unit -> unit;
+}
 
 type 'a _t =
   (* An empty queue content. No one is waiting. *)
@@ -14,22 +18,37 @@ type 'a _t =
   (* Someone is waiting on the queue.
      NB: The waiter (reference cell) is possibly shared among queues (for `dequeue_one_of`).
      Once invoked, the waiter cell is set to None, to prevent being called again *)
-  | EmptyWaiting of 'a maybe_waiting ref queue (* |q| > 0 *)
+  | EmptyWaiting of 'a waiter queue (* |q| > 0 *)
   | Killed of Monad.error
 
 type 'a t = 'a _t ref
 
+(* type 'b wrapped =
+   | Wrapped : { wrapped_queue : 'a t; wrapper : 'a -> 'b } -> 'b wrapped *)
+
 let return = Monad.return
 let create () = ref EmptyNotWaiting
 
+let new_waiter ?invalidate f =
+  let rec r =
+    {
+      waiter = Some f;
+      invalidate =
+        (fun () ->
+          r.waiter <- None;
+          match invalidate with Some f -> f () | None -> ());
+    }
+  in
+  r
+
 (* Dequeue a waiter if any. *)
-let rec pop_waiter (q : 'a maybe_waiting ref queue) =
+let rec pop_waiter (q : 'a waiter queue) =
   match Queue.pop q with
-  | Some (({ contents = Some f } as r), q) ->
+  | Some ({ waiter = Some f; invalidate }, q) ->
       (* Set it to None to prevent further call on the shared waiter *)
-      r := None;
+      invalidate ();
       Some (f, q)
-  | Some ({ contents = None }, q) -> pop_waiter q
+  | Some ({ waiter = None; _ }, q) -> pop_waiter q
   | None -> None
 
 let enqueue t value =
@@ -64,7 +83,7 @@ let dequeue t =
       (* Set up the internal queue for resolve functions *)
       let resq = match !t with EmptyWaiting q -> q | _ -> Queue.empty in
       (* Update the state by enqueuing the resolve function *)
-      t := EmptyWaiting (Queue.push (ref (Some resolv_f)) resq);
+      t := EmptyWaiting (Queue.push (new_waiter resolv_f) resq);
       promise
   | Queued q ->
       (* (2) A message is available in the queue. Dequeue it *)
@@ -81,15 +100,15 @@ let dequeue t =
 
 let add_shared_waiter t shared_resolv_f =
   match shared_resolv_f with
-  | { contents = None } -> ()
-  | { contents = Some resolv_f } -> (
+  | { waiter = None; _ } -> ()
+  | { waiter = Some resolv_f; invalidate } -> (
       match !t with
       | EmptyNotWaiting | EmptyWaiting _ ->
           let resq = match !t with EmptyWaiting q -> q | _ -> Queue.empty in
           (* Update the state by enqueuing the resolve function *)
           t := EmptyWaiting (Queue.push shared_resolv_f resq)
       | Queued q ->
-          shared_resolv_f := None;
+          invalidate ();
           let v, q =
             match Queue.pop q with
             | Some x -> x
@@ -99,13 +118,41 @@ let add_shared_waiter t shared_resolv_f =
           resolv_f (Ok v)
       | Killed err -> raise (QueueKilled err))
 
-let add_waiter t resolv_f = add_shared_waiter t (ref (Some resolv_f))
+let add_waiter t resolv_f = add_shared_waiter t (new_waiter resolv_f)
 
 let dequeue_one_of ts =
   let promise, resolv_f = Monad.create_promise () in
-  let shared_resolv_f = ref (Some resolv_f) in
+  let shared_resolv_f = new_waiter resolv_f in
   List.iter (fun t -> add_shared_waiter t shared_resolv_f) ts;
   promise
+
+(*
+   let dequeue_one_of_wrapped ts =
+     let invalidated = ref false in
+     let invalidate = ref (fun () -> invalidated := true) in
+     let promise, resolv_f = Monad.create_promise () in
+     let proc (Wrapped { wrapped_queue = t; wrapper }) =
+       if !invalidated then ()
+       else
+         let waiter =
+           new_waiter (fun x ->
+               !invalidate ();
+               match x with
+               | Ok x -> resolv_f (Ok (wrapper x))
+               | Error err -> resolv_f (Error err))
+         in
+         let old = !invalidate in
+         (invalidate :=
+            fun () ->
+              waiter.waiter <- None;
+              old ());
+         add_shared_waiter t waiter;
+         ()
+     in
+     List.iter proc ts;
+     promise
+
+   let wrap t f = Wrapped { wrapped_queue = t; wrapper = f } *)
 
 let kill t err =
   let t0 = !t in
@@ -114,11 +161,11 @@ let kill t err =
   | EmptyWaiting q ->
       let rec loop q =
         match Queue.pop q with
-        | Some (({ contents = Some resolv } as r), q) ->
-            r := None;
+        | Some ({ waiter = Some resolv; invalidate }, q) ->
+            invalidate ();
             resolv (Error err);
             loop q
-        | Some ({ contents = None }, q) -> loop q
+        | Some ({ waiter = None; _ }, q) -> loop q
         | None -> ()
       in
       loop q

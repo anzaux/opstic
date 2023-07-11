@@ -1,33 +1,47 @@
 open Types
+open Witness
+open Server
+open Monad
 
 let ( let* ) = Monad.bind
 
 type 'a ep = 'a Witness.ep = { ep_raw : Server.session; ep_witness : 'a Lin.t }
 type 'm inp = 'm Witness.inp
 type ('v, 'a) out = ('v, 'a) Witness.out
+type 'x service_spec = 'x Witness.service_spec
 
 let receive : 'a inp ep -> 'a Monad.t =
  fun ep ->
   let inproles = Lin.get ep.ep_witness in
-  let roles = List.map fst inproles in
-  let* queues = roles |> Monad.mapM (Server.Util.get_queue_ ep.ep_raw) in
-  let queues = List.map (fun (qp : Server.queue) -> qp.request_queue) queues in
-  let* (request : Server.http_request) =
-    ConcurrentQueue.dequeue_one_of queues
+  let get_queue (InpRole inprole) =
+    let role = Role.create inprole.role_constr.constr_name in
+    match inprole.path_kind with
+    | `Established ->
+        let* queue = Server.Util.get_queue_ ep.ep_raw role in
+        return queue.request_queue
+    | _ -> return @@ Hashtbl.find ep.ep_raw.service_ref.greetings role
   in
+  let* queues = List.map snd inproles |> mapM get_queue in
+  let* request = ConcurrentQueue.dequeue_one_of queues in
   let (InpRole inprole) = List.assoc request.request_role inproles in
+  let role = request.request_role in
   let label = inprole.parse_label request.request_body in
   let (InpLabel inplabel) = List.assoc label inprole.labels in
-  let v = inplabel.parse_payload request.request_body in
-  Monad.return
-    (inprole.role_constr.make_var
-       (inplabel.label_constr.make_var
-          ( v,
-            {
-              ep with
-              ep_witness =
-                Lin.create (Witness.witness (Lazy.force inplabel.cont));
-            } )))
+  let payload = inplabel.parse_payload request.request_body in
+  let var =
+    inprole.role_constr.make_var
+      (inplabel.label_constr.make_var
+         ( payload,
+           {
+             ep with
+             ep_witness =
+               Lin.create (Witness.witness (Lazy.force inplabel.cont));
+           } ))
+  in
+  let* queue = Server.Util.get_queue_ ep.ep_raw role in
+  ConcurrentQueue.add_waiter queue.response_queue
+    request.request_response_resolv;
+  return var
 
 let send : 'a 'b. 'a ep -> ('a -> ('v, 'b) out) -> 'v -> 'b ep Monad.t =
  fun ep call (*fun x -> x#a#lab*) v ->
@@ -52,4 +66,6 @@ let close (ep : unit ep) =
   ignore @@ Lin.get ep.ep_witness;
   Server.kill_session_ ep.ep_raw (msg_closing ep.ep_raw)
 
-(* let create raw wit = { ep_raw = raw; ep_witness = Lin.create wit } *)
+let start_service (t : Server.t) (spec : 'x Witness.service_spec) _f =
+  Server.register_service t ~spec:spec.sv_spec;
+  Monad.return ()

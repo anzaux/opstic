@@ -19,22 +19,22 @@ type service_spec = {
   parse_session_id : payload -> SessionId.t;
 }
 
+type http_response = { response_role : Role.t; response_body : payload }
+
 type http_request = {
+  request_sessionid : session_id option;
   request_path : string;
   request_role : Role.t;
   request_body : payload;
-  request_onerror : Monad.error -> unit;
+  request_response_resolv : http_response waiting;
 }
-
-type http_response = { response_role : Role.t; response_body : payload }
 
 type greeting0 = {
   greeting_request : http_request;
   greeting_response : http_response waiting;
 }
 
-type greeting = GreetingWithId of SessionId.t | Greeting of greeting0
-type greeting_queue = greeting ConcurrentQueue.t
+type greeting_queue = http_request ConcurrentQueue.t
 type request_queue = http_request ConcurrentQueue.t
 type response_queue = http_response ConcurrentQueue.t
 type queue = { request_queue : request_queue; response_queue : response_queue }
@@ -87,7 +87,6 @@ module Util = struct
            session_id ServiceId.pp service_id)
 
   let get_queue_ session role =
-    (* let* session = get_session t service_id session_id in *)
     hash_find session.queues role
       ~descr:
         (Format.asprintf "No role %a for session %a (service %a)" Role.pp role
@@ -97,10 +96,6 @@ module Util = struct
   let get_queue t service_id session_id role =
     let* session = get_session t service_id session_id in
     get_queue_ session role
-
-  (* let dequeue_greeting service role =
-     let* greeting_queue = get_greeting_queue_ service role in
-     ConcurrentQueue.dequeue greeting_queue *)
 end
 
 let create_server () : t =
@@ -150,81 +145,71 @@ let handle_entry server ~path (request : payload) : payload io =
     | Error err -> resolv (Error err)
   in
   let* service = Util.get_service_from_path server path in
-  let service_id = service.spec.service_id in
   let path_spec = Hashtbl.find service.spec.path_specs path in
   let role = path_spec.path_role in
-  let session_id = service.spec.parse_session_id request in
   let request =
     {
+      request_sessionid = None;
       request_path = path;
       request_role = role;
       request_body = request;
-      request_onerror = (fun err -> resolv (Error err));
+      request_response_resolv = resolv;
     }
   in
+  let service_id = service.spec.service_id in
   match path_spec.path_kind with
-  | `Established ->
-      let* peer = Util.get_queue server service_id session_id role in
-      ConcurrentQueue.enqueue peer.request_queue request;
-      ConcurrentQueue.add_waiter peer.response_queue resolv;
-      promise
   | `Greeting ->
-      let* queue = Util.get_greeting_queue server service_id role in
-      ConcurrentQueue.enqueue queue
-        (Greeting { greeting_request = request; greeting_response = resolv });
+      let* gqueue = Util.get_greeting_queue server service_id role in
+      ConcurrentQueue.enqueue gqueue request;
+      promise
+  | `Established ->
+      let session_id = service.spec.parse_session_id request.request_body in
+      let request = { request with request_sessionid = Some session_id } in
+      let* queue = Util.get_queue server service_id session_id role in
+      ConcurrentQueue.enqueue queue.request_queue request;
       promise
   | `GreetingWithId ->
-      let* () =
-        let (_ : session) = new_session service session_id in
-        return ()
-      in
-      let* () =
-        let* peer = Util.get_queue server service_id session_id role in
-        ConcurrentQueue.enqueue peer.request_queue request;
-        ConcurrentQueue.add_waiter peer.response_queue resolv;
-        return ()
-      in
-      let* () =
-        let* queue = Util.get_greeting_queue server service_id role in
-        ConcurrentQueue.enqueue queue (GreetingWithId session_id);
-        return ()
-      in
+      let session_id = service.spec.parse_session_id request.request_body in
+      let request = { request with request_sessionid = Some session_id } in
+      let (_ : session) = new_session service session_id in
+      let* gqueue = Util.get_greeting_queue server service_id role in
+      ConcurrentQueue.enqueue gqueue request;
       promise
 
 let kill_session_ session err =
   Hashtbl.remove session.service_ref.sessions session.session_id;
   session.queues
-  |> Hashtbl.iter (fun _ peer ->
-         ConcurrentQueue.kill peer.request_queue err;
-         ConcurrentQueue.kill peer.response_queue err)
+  |> Hashtbl.iter (fun _ queue ->
+         ConcurrentQueue.kill queue.request_queue err;
+         ConcurrentQueue.kill queue.response_queue err)
 
 let kill_session service session_id err =
   match Hashtbl.find_opt service.sessions session_id with
   | None -> ()
   | Some session -> kill_session_ session err
 
-let fresh_session_id () = SessionId.create (Int64.to_string (Random.bits64 ()))
+(* let fresh_session_id () = SessionId.create (Int64.to_string (Random.bits64 ())) *)
 
-let enqueue_greeting session role greeting =
-  let* peer = Util.get_queue_ session role in
-  ConcurrentQueue.enqueue peer.request_queue greeting.greeting_request;
-  ConcurrentQueue.add_waiter peer.response_queue greeting.greeting_response;
-  return ()
+(* let enqueue_greeting session role greeting =
+   let* peer = Util.get_queue_ session role in
+   ConcurrentQueue.enqueue peer.request_queue greeting.greeting_request;
+   ConcurrentQueue.add_waiter peer.response_queue greeting.greeting_response;
+   return () *)
 
-let init_session service : session io =
-  let queues =
-    service.spec.greeting_paths
-    |> List.map (fun path ->
-           let spec = Hashtbl.find service.spec.path_specs path in
-           Hashtbl.find service.greetings spec.path_role)
-  in
-  let* greeting = ConcurrentQueue.dequeue_one_of queues in
-  match greeting with
-  | Greeting greeting ->
-      let role = greeting.greeting_request.request_role in
-      let session_id = fresh_session_id () in
-      let session = new_session service session_id in
-      let* () = enqueue_greeting session role greeting in
-      return session
-  | GreetingWithId session_id ->
-      Util.get_session service.server_ref service.spec.service_id session_id
+(* let init_session service : session io =
+   let queues =
+     service.spec.greeting_paths
+     |> List.map (fun path ->
+            let spec = Hashtbl.find service.spec.path_specs path in
+            Hashtbl.find service.greetings spec.path_role)
+   in
+   let* greeting = ConcurrentQueue.dequeue_one_of queues in
+   match greeting with
+   | Greeting greeting ->
+       let role = greeting.greeting_request.request_role in
+       let session_id = fresh_session_id () in
+       let session = new_session service session_id in
+       let* () = enqueue_greeting session role greeting in
+       return session
+   | GreetingWithId session_id ->
+       Util.get_session service.server_ref service.spec.service_id session_id *)
