@@ -43,7 +43,10 @@ and 'a witness =
   | Inp : 'a inp -> 'a inp witness
   | Close : unit witness
 
-type 'a service = { sv_spec : Server.service_spec; sv_witness : 'a witness }
+type 'a service_spec = {
+  sv_spec : Server.service_spec;
+  sv_witness : 'a witness;
+}
 
 let parse_label_default payload =
   match Kxclib.Jv.pump_field "label" payload with
@@ -117,7 +120,7 @@ let create_service :
     my_role:string ->
     other_roles:string list ->
     'a witness ->
-    'a service =
+    'a service_spec =
  fun ?(parse_session_id = parse_sessionid_default) ~id ~my_role ~other_roles
      witness ->
   let my_role = Role.create my_role in

@@ -41,7 +41,7 @@ and 'a witness =
   | Inp : 'a inp -> 'a inp witness
   | Close : unit witness
 
-type 'a service = { sv_spec : Server.service_spec; sv_witness : 'a witness }
+type 'a service_spec = { sv_spec : Server.service_spec; sv_witness : 'a witness }
 
 val to_pathspec : 'a witness -> Server.path_spec list
 
@@ -51,7 +51,7 @@ val create_service :
   my_role:string ->
   other_roles:string list ->
   'a witness ->
-  'a service
+  'a service_spec
 
 val make_inp_label :
   constr:('a, 'b * 'c ep) Rows.constr ->
