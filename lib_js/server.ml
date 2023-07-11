@@ -37,11 +37,7 @@ type greeting = GreetingWithId of SessionId.t | Greeting of greeting0
 type greeting_queue = greeting ConcurrentQueue.t
 type request_queue = http_request ConcurrentQueue.t
 type response_queue = http_response ConcurrentQueue.t
-
-type queue = {
-  request_queue : request_queue;
-  response_queue : response_queue;
-}
+type queue = { request_queue : request_queue; response_queue : response_queue }
 
 type session = {
   session_id : session_id;
@@ -56,18 +52,28 @@ and service = {
   server_ref : t;
 }
 
-and t = { services : (ServiceId.t, service) Hashtbl.t }
+and t = {
+  services : (ServiceId.t, service) Hashtbl.t;
+  service_path : (string, service_id) Hashtbl.t;
+}
 
 module Util = struct
   let get_service t service_id =
     hash_find t.services service_id
       ~descr:(Format.asprintf "No entry point: %a" ServiceId.pp service_id)
 
+  let get_service_from_path t path =
+    let* service_id =
+      hash_find ~descr:(Format.asprintf "No path %s" path) t.service_path path
+    in
+    hash_find t.services service_id
+      ~descr:(Format.asprintf "No entry point: %a" ServiceId.pp service_id)
+
   let get_greeting_queue_ service role =
     hash_find service.greetings role
       ~descr:
-        (Format.asprintf "Service %a Role %a is not accepting peer"
-           ServiceId.pp service.spec.service_id Role.pp role)
+        (Format.asprintf "Service %a Role %a is not accepting peer" ServiceId.pp
+           service.spec.service_id Role.pp role)
 
   let get_greeting_queue t service_id role =
     let* service = get_service t service_id in
@@ -84,8 +90,8 @@ module Util = struct
     (* let* session = get_session t service_id session_id in *)
     hash_find session.queues role
       ~descr:
-        (Format.asprintf "No role %a for session %a (service %a)"
-           Role.pp role SessionId.pp session.session_id ServiceId.pp
+        (Format.asprintf "No role %a for session %a (service %a)" Role.pp role
+           SessionId.pp session.session_id ServiceId.pp
            session.service_ref.spec.service_id)
 
   let get_queue t service_id session_id role =
@@ -97,10 +103,11 @@ module Util = struct
      ConcurrentQueue.dequeue greeting_queue *)
 end
 
-let create_server () : t = { services = Hashtbl.create 42 }
+let create_server () : t =
+  { services = Hashtbl.create 42; service_path = Hashtbl.create 42 }
 
 let register_service (server : t) ~spec =
-  let ent =
+  let sv =
     {
       spec;
       greetings = Hashtbl.create 42;
@@ -108,12 +115,16 @@ let register_service (server : t) ~spec =
       server_ref = server;
     }
   in
-  let register ent role =
-    Hashtbl.replace ent.greetings role (ConcurrentQueue.create ())
+  let register_role sv role =
+    Hashtbl.replace sv.greetings role (ConcurrentQueue.create ())
   in
-  spec.other_roles |> List.iter (register ent);
-  Hashtbl.replace server.services spec.service_id ent;
-  ent
+  spec.other_roles |> List.iter (register_role sv);
+  let register_path path =
+    Hashtbl.replace server.service_path path sv.spec.service_id
+  in
+  Hashtbl.to_seq_keys spec.path_specs |> Seq.iter register_path;
+  Hashtbl.replace server.services spec.service_id sv;
+  ()
 
 let create_session service session_id =
   let roles = service.spec.other_roles in
@@ -132,13 +143,14 @@ let new_session service session_id =
   Hashtbl.replace service.sessions session_id session;
   session
 
-let handle_entry server ~service_id ~path (request : payload) : payload io =
+let handle_entry server ~path (request : payload) : payload io =
   let promise, resolv = Monad.create_promise () in
   let resolv = function
     | Ok response -> resolv (Ok response.response_body)
     | Error err -> resolv (Error err)
   in
-  let* service = Util.get_service server service_id in
+  let* service = Util.get_service_from_path server path in
+  let service_id = service.spec.service_id in
   let path_spec = Hashtbl.find service.spec.path_specs path in
   let role = path_spec.path_role in
   let session_id = service.spec.parse_session_id request in
@@ -215,5 +227,4 @@ let init_session service : session io =
       let* () = enqueue_greeting session role greeting in
       return session
   | GreetingWithId session_id ->
-      Util.get_session service.server_ref service.spec.service_id
-        session_id
+      Util.get_session service.server_ref service.spec.service_id session_id

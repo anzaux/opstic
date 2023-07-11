@@ -46,22 +46,12 @@ and service = {
 }
 
 val create_server : unit -> t
-val register_service : t -> spec:service_spec -> service
-
-val handle_entry :
-  t -> service_id:Types.service_id -> path:string -> payload -> payload Types.io
-
+val register_service : t -> spec:service_spec -> unit
+val handle_entry : t -> path:string -> payload -> payload io
 val init_session : service -> session io
 val kill_session_ : session -> Monad.error -> unit
 val kill_session : service -> session_id -> Monad.error -> unit
 
-(* val accept_greeting :
-   [ `Greeting | `GreetingWithId ] -> service -> session -> role -> unit io *)
-
 module Util : sig
-  val get_service : t -> service_id -> service Monad.t
-  val get_greeting_queue : t -> service_id -> role -> greeting_queue Monad.t
-  val get_session : t -> service_id -> session_id -> session Monad.t
   val get_queue_ : session -> role -> queue Monad.t
-  val get_queue : t -> service_id -> session_id -> role -> queue Monad.t
 end
