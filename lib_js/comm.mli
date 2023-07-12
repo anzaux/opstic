@@ -10,12 +10,12 @@ val receive : ([> ] as 'b) inp ep -> 'b io
 val close : unit ep -> unit
 
 val start_service :
-  ServerImpl.Server0.t ->
+  ServerImpl.Server.t ->
   'a inp Witness.service_spec ->
   ('a -> unit io) ->
   'b io
 
 val register_service :
-  ServerImpl.Server0.t -> 'x Witness.service_spec -> 'x service
+  ServerImpl.Server.t -> 'x Witness.service_spec -> 'x service
 
-val accept : ServerImpl.Server0.t -> 'a inp service -> 'a io
+val accept : ServerImpl.Server.t -> 'a inp service -> 'a io

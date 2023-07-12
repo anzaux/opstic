@@ -11,7 +11,7 @@ type ('v, 'a) out = ('v, 'a) Witness.out
 type 'x service = { sv_service_id : service_id; sv_witness : 'x }
 
 let register_service t spec =
-  Server0.register_service t ~spec:spec.sv_spec;
+  Server.register_service t ~spec:spec.sv_spec;
   { sv_service_id = spec.sv_spec.service_id; sv_witness = spec.sv_witness }
 
 let parse_request : type a. a inp -> session -> request -> a io =
@@ -42,13 +42,13 @@ let process_request session (inproles : _ inp) request =
   ConcurrentQueue.add_waiter queue.response_queue request.request_resolv;
   return var
 
-let accept : type a. Server0.t -> a inp service -> a io =
+let accept : type a. Server.t -> a inp service -> a io =
  fun t { sv_service_id; sv_witness = inp } ->
   let pathspecs =
     inp |> List.map (fun (_, InpRole inprole) -> inprole.path_spec)
   in
-  let service = Server0.service t sv_service_id in
-  let* session, request = accept_at_paths service pathspecs in
+  let service = Server.service t sv_service_id in
+  let* session, request = Comm.accept_at_paths service pathspecs in
   process_request session inp request
 
 let receive : 'a inp ep -> 'a io =
@@ -57,7 +57,7 @@ let receive : 'a inp ep -> 'a io =
   let pathspecs =
     inproles |> List.map (fun (_, InpRole inprole) -> inprole.path_spec)
   in
-  let* request = receive_at_paths ep.ep_raw pathspecs in
+  let* request = Comm.receive_at_paths ep.ep_raw pathspecs in
   process_request ep.ep_raw inproles request
 
 let send : 'a 'b. 'a ep -> ('a -> ('v, 'b) out) -> 'v -> 'b ep io =
@@ -82,8 +82,8 @@ let close (ep : unit ep) =
   ignore @@ Lin.get ep.ep_witness;
   Session.kill ep.ep_raw (msg_closing ep.ep_raw)
 
-let start_service (type a) (t : Server0.t)
-    (spec : a inp Witness.service_spec) (f : a -> unit io) =
+let start_service (type a) (t : Server.t) (spec : a inp Witness.service_spec)
+    (f : a -> unit io) =
   let sv = register_service t spec in
   let rec loop () =
     let* var = accept t sv in

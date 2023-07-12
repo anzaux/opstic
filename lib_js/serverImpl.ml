@@ -103,7 +103,7 @@ module Service = struct
     session
 end
 
-module Server0 = struct
+module Server = struct
   type nonrec t = server
 
   let create () : t =
@@ -144,80 +144,83 @@ module Server0 = struct
     Hashtbl.to_seq_values spec.path_specs |> Seq.iter register_path;
     Hashtbl.replace server.services spec.service_id sv;
     ()
+
+  let handle_request t ~path (request : payload) : payload io =
+    let promise, resolv = Monad.create_promise () in
+    let path = Path.create path in
+    let* sv = get_service t ~path in
+    let path_spec = Hashtbl.find sv.spec.path_specs path in
+    let role = path_spec.path_role in
+    let request =
+      {
+        request_pathspec = path_spec;
+        request_body = request;
+        request_resolv = resolv;
+      }
+    in
+    match path_spec.path_kind with
+    | `Greeting ->
+        let gqueue = Service.greeting_queue sv ~path in
+        ConcurrentQueue.enqueue gqueue request;
+        promise
+    | `Established ->
+        let* session_id = sv.spec.parse_session_id request.request_body in
+        let* session = Service.get_session sv session_id in
+        let queue = Session.queues session role in
+        ConcurrentQueue.enqueue queue.request_queue request;
+        promise
+    | `Invitation ->
+        let* session_id = sv.spec.parse_session_id request.request_body in
+        let session = Service.new_session sv session_id in
+        let iqueue = Service.invitation_queue sv ~path in
+        ConcurrentQueue.enqueue iqueue (session, request);
+        promise
 end
 
-let handle_request t ~path (request : payload) : payload io =
-  let promise, resolv = Monad.create_promise () in
-  let path = Path.create path in
-  let* sv = Server0.get_service t ~path in
-  let path_spec = Hashtbl.find sv.spec.path_specs path in
-  let role = path_spec.path_role in
-  let request =
-    {
-      request_pathspec = path_spec;
-      request_body = request;
-      request_resolv = resolv;
-    }
-  in
-  match path_spec.path_kind with
-  | `Greeting ->
-      let gqueue = Service.greeting_queue sv ~path in
-      ConcurrentQueue.enqueue gqueue request;
-      promise
-  | `Established ->
-      let* session_id = sv.spec.parse_session_id request.request_body in
-      let* session = Service.get_session sv session_id in
-      let queue = Session.queues session role in
-      ConcurrentQueue.enqueue queue.request_queue request;
-      promise
-  | `Invitation ->
-      let* session_id = sv.spec.parse_session_id request.request_body in
-      let session = Service.new_session sv session_id in
-      let iqueue = Service.invitation_queue sv ~path in
-      ConcurrentQueue.enqueue iqueue (session, request);
-      promise
+module Comm = struct
+  let fresh_session_id () =
+    SessionId.create (Int64.to_string (Random.bits64 ()))
 
-let fresh_session_id () = SessionId.create (Int64.to_string (Random.bits64 ()))
+  let create_new_session_from_greeting ~service ~role request =
+    let session_id = fresh_session_id () in
+    let session = Service.new_session service session_id in
+    match Hashtbl.find_opt session.queues role with
+    | Some queue ->
+        ConcurrentQueue.enqueue queue.request_queue request;
+        Ok (session, request)
+    | None -> Error (Monad.mpst_error "accept_from_paths: impossible")
 
-let create_new_session_from_greeting ~service ~role request =
-  let session_id = fresh_session_id () in
-  let session = Service.new_session service session_id in
-  match Hashtbl.find_opt session.queues role with
-  | Some queue ->
-      ConcurrentQueue.enqueue queue.request_queue request;
-      Ok (session, request)
-  | None -> Error (Monad.mpst_error "accept_from_paths: impossible")
+  let accept_at_paths service pathspecs =
+    let new_session_queue_from_path pathspec =
+      match pathspec.path_kind with
+      | `Greeting ->
+          let queue = Service.greeting_queue service ~path:pathspec.path in
+          ConcurrentQueue.wrap queue
+            (create_new_session_from_greeting ~service ~role:pathspec.path_role)
+      | `Invitation ->
+          let queue = Service.invitation_queue service ~path:pathspec.path in
+          ConcurrentQueue.wrap queue (fun x -> Ok x)
+      | `Established ->
+          failwith
+            (Format.asprintf "Path %a is for established session" Path.pp
+               pathspec.path)
+    in
+    let wqs = List.map new_session_queue_from_path pathspecs in
+    ConcurrentQueue.dequeue_one_of_wrapped wqs
 
-let accept_at_paths service pathspecs =
-  let new_session_queue_from_path pathspec =
-    match pathspec.path_kind with
-    | `Greeting ->
-        let queue = Service.greeting_queue service ~path:pathspec.path in
-        ConcurrentQueue.wrap queue
-          (create_new_session_from_greeting ~service ~role:pathspec.path_role)
-    | `Invitation ->
-        let queue = Service.invitation_queue service ~path:pathspec.path in
-        ConcurrentQueue.wrap queue (fun x -> Ok x)
-    | `Established ->
-        failwith
-          (Format.asprintf "Path %a is for established session" Path.pp
-             pathspec.path)
-  in
-  let wqs = List.map new_session_queue_from_path pathspecs in
-  ConcurrentQueue.dequeue_one_of_wrapped wqs
-
-let receive_at_paths session pathspecs =
-  let get_queue pathspec =
-    match pathspec.path_kind with
-    | `Established ->
-        let queues = Session.queues session pathspec.path_role in
-        queues.request_queue
-    | `Greeting ->
-        Service.greeting_queue session.service_ref ~path:pathspec.path
-    | `Invitation ->
-        failwith
-          (Format.asprintf "Path %a is for initial reception (invitation)"
-             Path.pp pathspec.path)
-  in
-  let queues = List.map get_queue pathspecs in
-  ConcurrentQueue.dequeue_one_of queues
+  let receive_at_paths session pathspecs =
+    let get_queue pathspec =
+      match pathspec.path_kind with
+      | `Established ->
+          let queues = Session.queues session pathspec.path_role in
+          queues.request_queue
+      | `Greeting ->
+          Service.greeting_queue session.service_ref ~path:pathspec.path
+      | `Invitation ->
+          failwith
+            (Format.asprintf "Path %a is for initial reception (invitation)"
+               Path.pp pathspec.path)
+    in
+    let queues = List.map get_queue pathspecs in
+    ConcurrentQueue.dequeue_one_of queues
+end

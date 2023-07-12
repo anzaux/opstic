@@ -27,19 +27,20 @@ type queues = { request_queue : request_queue; response_queue : response_queue }
 type greeting_queue = request ConcurrentQueue.t
 type invitation_queue = (session * request) ConcurrentQueue.t
 
-module Server0 : sig
+module Server : sig
   type t = server
 
   val create : unit -> t
   val service : t -> service_id -> service
   val register_service : t -> spec:service_spec -> unit
   val get_service : t -> path:path -> service io
+  val handle_request : t -> path:string -> payload -> payload io
 end
 
 module Service : sig
   type t = service
 
-  val server : t -> Server0.t
+  val server : t -> Server.t
   val id : t -> service_id
   val spec : t -> service_spec
   val greeting_queue : t -> path:path -> greeting_queue
@@ -56,6 +57,7 @@ module Session : sig
   val kill : t -> Monad.error -> unit
 end
 
-val handle_request : Server0.t -> path:string -> payload -> payload io
-val accept_at_paths : Service.t -> path_spec list -> (Session.t * request) io
-val receive_at_paths : Session.t -> path_spec list -> request io
+module Comm : sig
+  val accept_at_paths : Service.t -> path_spec list -> (Session.t * request) io
+  val receive_at_paths : Session.t -> path_spec list -> request io
+end
