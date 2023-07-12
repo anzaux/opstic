@@ -22,8 +22,12 @@ let sample1 () =
               InpRole
                 {
                   role_constr = b;
-                  path = "";
-                  path_kind = `Greeting;
+                  path_spec =
+                    {
+                      path = Path.create "";
+                      path_kind = `Greeting;
+                      path_role = Role.create "b";
+                    };
                   parse_label = assert false;
                   labels =
                     [

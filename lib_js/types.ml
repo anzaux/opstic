@@ -7,9 +7,11 @@ type payload = Json.jv
 module SessionId = Id.Make ()
 module ServiceId = Id.Make ()
 module Role = Id.Make ()
+module Path = Id.Make ()
 
-type path_kind = [ `Greeting | `GreetingWithId | `Established ]
+type path_kind = [ `Greeting | `Invitation | `Established ]
 type session_id = SessionId.t [@@deriving show]
 type service_id = ServiceId.t [@@deriving show]
 type role = Role.t [@@deriving show]
+type path = Path.t [@@deriving show]
 type 'a io = 'a Monad.t

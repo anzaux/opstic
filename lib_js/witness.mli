@@ -13,8 +13,7 @@ type _ inp_label =
 and _ inp_role =
   | InpRole : {
       role_constr : ('a, 'l) Rows.constr;
-      path : string;
-      path_kind : Types.path_kind;
+      path_spec : Server.path_spec;
       parse_label : Types.payload -> string;
       labels : (string * 'l inp_label) list;
     }
@@ -41,7 +40,10 @@ and 'a witness =
   | Inp : 'a inp -> 'a inp witness
   | Close : unit witness
 
-type 'a service_spec = { sv_spec : Server.service_spec; sv_witness : 'a witness }
+type 'a service_spec = {
+  sv_spec : Server.service_spec;
+  sv_witness : 'a witness;
+}
 
 val to_pathspec : 'a witness -> Server.path_spec list
 
@@ -62,7 +64,7 @@ val make_inp_label :
 val make_inp_role :
   ?path_kind:path_kind ->
   ?parse_label:(payload -> string) ->
-  path:string ->
+  path:path ->
   constr:('a, 'b) Rows.constr ->
   (string * 'b inp_label) list ->
   'a inp_role

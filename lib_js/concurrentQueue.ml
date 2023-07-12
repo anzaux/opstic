@@ -6,7 +6,11 @@ type 'a ok_or_error = ('a, Monad.error) result
 type 'a waiting = 'a ok_or_error -> unit
 
 type _ waiter =
-  | Waiter : { waiting : 'b waiting option ref; wrap : 'a -> 'b } -> 'a waiter
+  | Waiter : {
+      waiting : 'b waiting option ref;
+      wrap : 'a -> 'b ok_or_error;
+    }
+      -> 'a waiter
 
 type 'a _t =
   (* An empty queue content. No one is waiting. *)
@@ -20,17 +24,20 @@ type 'a _t =
   | Killed of Monad.error
 
 type 'a t = 'a _t ref
-type _ wrapped = Wrapped : { queue : 'b t; wrap : 'b -> 'a } -> 'a wrapped
+
+type _ wrapped =
+  | Wrapped : { queue : 'b t; wrap : 'b -> 'a ok_or_error } -> 'a wrapped
 
 let return = Monad.return
 let create () = ref EmptyNotWaiting
 let invalidate_waiter (Waiter r) = r.waiting := None
 
-let wrap_waiting waiting f = function
-  | Ok x -> waiting (Ok (f x))
+let wrap_waiting (type a b) (waiting : a waiting) (f : b -> a ok_or_error) :
+    b waiting = function
+  | Ok x -> waiting (f x)
   | Error err -> waiting (Error err)
 
-let new_waiter f = Waiter { waiting = ref (Some f); wrap = (fun x -> x) }
+let new_waiter f = Waiter { waiting = ref (Some f); wrap = (fun x -> Ok x) }
 let new_shared_waiter ~wrap waiting = Waiter { waiting; wrap }
 
 (* Dequeue a waiter if any. *)
@@ -43,7 +50,7 @@ let rec pop_waiter (q : 'a waiter queue) =
   | Some (Waiter { waiting = { contents = None }; _ }, q) -> pop_waiter q
   | None -> None
 
-let enqueue t value =
+let enqueue (type a) (t : a t) (value : a) =
   let q =
     (* (1) enqueueing it or (2) deliver the value directly to the waiting thread *)
     match !t with
@@ -66,7 +73,7 @@ let enqueue t value =
   in
   t := q
 
-let dequeue t =
+let dequeue (type a) (t : a t) : a Monad.t =
   (* Check the response queue and (1) make a promise if empty or (2) send back the message directly if some   *)
   match !t with
   | EmptyNotWaiting | EmptyWaiting _ ->

@@ -15,8 +15,7 @@ type _ inp_label =
 and _ inp_role =
   | InpRole : {
       role_constr : ('a, 'l) Rows.constr;
-      path : string;
-      path_kind : path_kind;
+      path_spec : Server.path_spec;
       parse_label : payload -> string;
       labels : (string * 'l inp_label) list;
     }
@@ -63,7 +62,14 @@ let make_inp_label ~constr ~label_constr cont =
 
 let make_inp_role ?(path_kind = `Established)
     ?(parse_label = parse_label_default) ~path ~constr labels =
-  InpRole { path_kind; path; role_constr = constr; parse_label; labels }
+  InpRole
+    {
+      path_spec =
+        { path_kind; path; path_role = Role.create constr.constr_name };
+      role_constr = constr;
+      parse_label;
+      labels;
+    }
 
 let make_inp inproles : 'a inp witness =
   Inp
@@ -72,7 +78,7 @@ let make_inp inproles : 'a inp witness =
          (Role.create inprole.role_constr.constr_name, i))
        inproles)
 
-type visited = string list (* paths *)
+type visited = path list (* paths *)
 
 let rec pathspec_out :
     type obj. visited -> obj -> obj out_labels -> Server.path_spec list =
@@ -87,21 +93,13 @@ and pathspec_inp_label : type l. visited -> l inp_label -> Server.path_spec list
 and pathspec_inp_role :
     type var. visited -> var inp_role -> Server.path_spec list =
  fun visited (InpRole inp : var inp_role) ->
-  if List.mem inp.path visited then []
+  if List.mem inp.path_spec.path visited then []
   else
-    let pathspec =
-      Server.
-        {
-          path_role = Role.create inp.role_constr.constr_name;
-          path = inp.path;
-          path_kind = inp.path_kind;
-        }
-    in
     let pathspecs =
       List.map snd inp.labels
       |> List.concat_map (fun inplabel -> pathspec_inp_label visited inplabel)
     in
-    pathspec :: pathspecs
+    inp.path_spec :: pathspecs
 
 and to_pathspec_aux :
     type a. visited -> a witness lazy_t -> Server.path_spec list =
@@ -130,17 +128,10 @@ let create_service :
   path_specs0
   |> List.iter (fun path_spec ->
          Hashtbl.replace path_specs path_spec.path path_spec);
-  let greeting_paths =
-    path_specs0
-    |> List.filter_map (fun path_spec ->
-           if path_spec.path_kind = `Established then None
-           else Some path_spec.path)
-  in
   let spec =
     {
       service_id = ServiceId.create id;
       path_specs;
-      greeting_paths;
       my_role;
       other_roles;
       parse_session_id =

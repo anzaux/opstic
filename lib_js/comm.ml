@@ -10,21 +10,9 @@ type 'm inp = 'm Witness.inp
 type ('v, 'a) out = ('v, 'a) Witness.out
 type 'x service_spec = 'x Witness.service_spec
 
-let receive : 'a inp ep -> 'a Monad.t =
- fun ep ->
-  let inproles = Lin.get ep.ep_witness in
-  let get_queue (InpRole inprole) =
-    let role = Role.create inprole.role_constr.constr_name in
-    match inprole.path_kind with
-    | `Established ->
-        let* queue = Server.Util.get_queue_ ep.ep_raw role in
-        return queue.request_queue
-    | _ -> return @@ Hashtbl.find ep.ep_raw.service_ref.greetings role
-  in
-  let* queues = List.map snd inproles |> mapM get_queue in
-  let* request = ConcurrentQueue.dequeue_one_of queues in
-  let (InpRole inprole) = List.assoc request.request_role inproles in
-  let role = request.request_role in
+let receive_body session (inproles : _ inp) request =
+  let role = request.request_pathspec.path_role in
+  let (InpRole inprole) = List.assoc role inproles in
   let label = inprole.parse_label request.request_body in
   let (InpLabel inplabel) = List.assoc label inprole.labels in
   let payload = inplabel.parse_payload request.request_body in
@@ -33,15 +21,23 @@ let receive : 'a inp ep -> 'a Monad.t =
       (inplabel.label_constr.make_var
          ( payload,
            {
-             ep with
+             ep_raw = session;
              ep_witness =
                Lin.create (Witness.witness (Lazy.force inplabel.cont));
            } ))
   in
-  let* queue = Server.Util.get_queue_ ep.ep_raw role in
-  ConcurrentQueue.add_waiter queue.response_queue
-    request.request_response_resolv;
+  let* queue = Server.Util.get_queue_ session role in
+  ConcurrentQueue.add_waiter queue.response_queue request.request_resolv;
   return var
+
+let receive : 'a inp ep -> 'a Monad.t =
+ fun ep ->
+  let inproles = Lin.get ep.ep_witness in
+  let pathspecs =
+    inproles |> List.map (fun (_, InpRole inprole) -> inprole.path_spec)
+  in
+  let* request = Server.receive_at_paths ep.ep_raw pathspecs in
+  receive_body ep.ep_raw inproles request
 
 let send : 'a 'b. 'a ep -> ('a -> ('v, 'b) out) -> 'v -> 'b ep Monad.t =
  fun ep call (*fun x -> x#a#lab*) v ->

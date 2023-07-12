@@ -13,5 +13,5 @@ val dequeue_one_of : 'a t list -> 'a Monad.t
 
 type 'a wrapped
 
-val wrap : 'a t -> ('a -> 'b) -> 'b wrapped
+val wrap : 'a t -> ('a -> 'b ok_or_error) -> 'b wrapped
 val dequeue_one_of_wrapped : 'a wrapped list -> 'a Monad.t
