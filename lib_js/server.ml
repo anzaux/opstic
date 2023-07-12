@@ -19,7 +19,7 @@ type service_spec = {
       (* path, header 等も含めたい 生の http request という abstractionがあれば…*)
 }
 
-type response = { response_role : role; response_body : payload }
+type response = payload
 
 type request = {
   request_pathspec : path_spec;
@@ -151,10 +151,6 @@ let new_session service session_id =
 
 let handle_entry server ~path (request : payload) : payload io =
   let promise, resolv = Monad.create_promise () in
-  let resolv = function
-    | Ok response -> resolv (Ok response.response_body)
-    | Error err -> resolv (Error err)
-  in
   let path = Path.create path in
   let* service = Util.get_service_from_path server path in
   let path_spec = Hashtbl.find service.spec.path_specs path in

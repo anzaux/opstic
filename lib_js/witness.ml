@@ -26,7 +26,7 @@ and 'a inp = (Role.t * 'a inp_role) list
 and ('v, 'a) out = {
   out_role : Role.t;
   out_label : string;
-  out_marshal : 'v -> payload;
+  out_unparse : session_id -> string -> 'v -> payload;
   out_cont : 'a witness lazy_t;
 }
 
@@ -42,10 +42,7 @@ and 'a witness =
   | Inp : 'a inp -> 'a inp witness
   | Close : unit witness
 
-type 'a service_spec = {
-  sv_spec : Server.service_spec;
-  sv_witness : 'a witness;
-}
+type 'a service_spec = { sv_spec : Server.service_spec; sv_witness : 'a }
 
 let parse_label_default payload =
   match Kxclib.Jv.pump_field "label" payload with
@@ -57,8 +54,8 @@ let parse_sessionid_default payload =
   | `obj (("session_id", `str lab) :: _) -> lab
   | _ -> failwith "no label"
 
-let make_inp_label ~constr ~label_constr cont =
-  InpLabel { label_constr = constr; parse_payload = label_constr; cont }
+let make_inp_label ~constr ~parse cont =
+  InpLabel { label_constr = constr; parse_payload = parse; cont }
 
 let make_inp_role ?(path_kind = `Established)
     ?(parse_label = parse_label_default) ~path ~constr labels =
@@ -110,9 +107,14 @@ and to_pathspec_aux :
       out.labels |> List.map (pathspec_out visited out.obj) |> List.concat
   | Close -> []
 
+let get_witness : type a. a witness -> a = function
+  | Inp inp -> inp
+  | Out out -> out.obj
+  | Close -> ()
+
 let to_pathspec x = to_pathspec_aux [] (Lazy.from_val x)
 
-let create_service :
+let create_service_spec :
     ?parse_session_id:(payload -> string) ->
     id:string ->
     my_role:string ->
@@ -138,10 +140,10 @@ let create_service :
         (fun payload -> SessionId.create (parse_session_id payload));
     }
   in
-  { sv_spec = spec; sv_witness = witness }
+  { sv_spec = spec; sv_witness = get_witness witness }
 
-let make_out ~role ~label ~marshal next =
-  { out_role = role; out_label = label; out_marshal = marshal; out_cont = next }
+let make_out ~role ~label ~unparse next =
+  { out_role = role; out_label = label; out_unparse = unparse; out_cont = next }
 
 let witness : type a. a witness -> a = function
   | Out out -> out.obj

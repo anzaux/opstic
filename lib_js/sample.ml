@@ -61,7 +61,7 @@ let sample1 () =
                                                {
                                                  out_role = Role.create "b";
                                                  out_label = "lab2";
-                                                 out_marshal = assert false;
+                                                 out_unparse = assert false;
                                                  out_cont = Lazy.from_val Close;
                                                }
 
@@ -69,7 +69,7 @@ let sample1 () =
                                                {
                                                  out_role = Role.create "b";
                                                  out_label = "lab3";
-                                                 out_marshal = assert false;
+                                                 out_unparse = assert false;
                                                  out_cont = Lazy.from_val Close;
                                                }
                                            end
@@ -82,5 +82,5 @@ let sample1 () =
       : [< `b of [< `lab of _ ] ] inp witness lazy_t)
     (* NB this type annotation is mandatory for session-type safety *)
   in
-  Witness.create_service ~id:"sample0" ~my_role:"a" ~other_roles:[ "b" ]
+  Witness.create_service_spec ~id:"sample0" ~my_role:"a" ~other_roles:[ "b" ]
     (Lazy.force wit_a)

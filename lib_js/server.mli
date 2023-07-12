@@ -11,7 +11,7 @@ type service_spec = {
   parse_session_id : payload -> SessionId.t;
 }
 
-type response = { response_role : Role.t; response_body : payload }
+type response = payload
 
 type request = {
   request_pathspec : path_spec;
@@ -44,11 +44,11 @@ val register_service : t -> spec:service_spec -> unit
 val handle_entry : t -> path:string -> payload -> payload io
 val receive_at_paths : session -> path_spec list -> request io
 val accept_at_paths : service -> path_spec list -> (session_id * request) io
-
-(* val init_session : service -> session io *)
 val kill_session_ : session -> Monad.error -> unit
 val kill_session : service -> session_id -> Monad.error -> unit
 
 module Util : sig
-  val get_queue_ : session -> role -> queue Monad.t
+  val get_service : t -> service_id -> service io
+  val get_session : t -> service_id -> session_id -> session io
+  val get_queue_ : session -> role -> queue io
 end

@@ -24,7 +24,7 @@ and 'a inp = (Role.t * 'a inp_role) list
 and ('v, 'a) out = {
   out_role : Role.t;
   out_label : string;
-  out_marshal : 'v -> Types.payload;
+  out_unparse : session_id -> string -> 'v -> Types.payload;
   out_cont : 'a witness lazy_t;
 }
 
@@ -40,14 +40,11 @@ and 'a witness =
   | Inp : 'a inp -> 'a inp witness
   | Close : unit witness
 
-type 'a service_spec = {
-  sv_spec : Server.service_spec;
-  sv_witness : 'a witness;
-}
+type 'a service_spec = { sv_spec : Server.service_spec; sv_witness : 'a }
 
 val to_pathspec : 'a witness -> Server.path_spec list
 
-val create_service :
+val create_service_spec :
   ?parse_session_id:(payload -> string) ->
   id:string ->
   my_role:string ->
@@ -57,7 +54,7 @@ val create_service :
 
 val make_inp_label :
   constr:('a, 'b * 'c ep) Rows.constr ->
-  label_constr:(Types.payload -> 'b) ->
+  parse:(Types.payload -> 'b) ->
   'c witness lazy_t ->
   'a inp_label
 
@@ -74,7 +71,7 @@ val make_inp : 'a inp_role list -> 'a inp witness
 val make_out :
   role:Role.t ->
   label:string ->
-  marshal:('a -> Types.payload) ->
+  unparse:(session_id -> string -> 'a -> Types.payload) ->
   'b witness lazy_t ->
   ('a, 'b) out
 
