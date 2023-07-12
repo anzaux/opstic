@@ -7,7 +7,7 @@ type 'a ep = { ep_raw : Server.session; ep_witness : 'a Lin.t }
 type _ inp_label =
   | InpLabel : {
       label_constr : ('m, 'v * 'b ep) Rows.constr;
-      parse_payload : payload -> 'v;
+      parse_payload : payload -> 'v io;
       cont : 'b witness lazy_t;
     }
       -> 'm inp_label
@@ -16,7 +16,7 @@ and _ inp_role =
   | InpRole : {
       role_constr : ('a, 'l) Rows.constr;
       path_spec : Server.path_spec;
-      parse_label : payload -> string;
+      parse_label : payload -> string io;
       labels : (string * 'l inp_label) list;
     }
       -> 'a inp_role
@@ -26,7 +26,7 @@ and 'a inp = (Role.t * 'a inp_role) list
 and ('v, 'a) out = {
   out_role : Role.t;
   out_label : string;
-  out_unparse : session_id -> string -> 'v -> payload;
+  out_unparse : session_id -> string -> 'v -> payload io;
   out_cont : 'a witness lazy_t;
 }
 
@@ -46,13 +46,13 @@ type 'a service_spec = { sv_spec : Server.service_spec; sv_witness : 'a }
 
 let parse_label_default payload =
   match Kxclib.Jv.pump_field "label" payload with
-  | `obj (("label", `str lab) :: _) -> lab
-  | _ -> failwith "no label"
+  | `obj (("label", `str lab) :: _) -> Monad.return lab
+  | _ -> Monad.error_with "parse_label_default: no label"
 
 let parse_sessionid_default payload =
   match Kxclib.Jv.pump_field "session_id" payload with
-  | `obj (("session_id", `str lab) :: _) -> lab
-  | _ -> failwith "no label"
+  | `obj (("session_id", `str lab) :: _) -> Monad.return lab
+  | _ -> Monad.error_with "no label"
 
 let make_inp_label ~constr ~parse cont =
   InpLabel { label_constr = constr; parse_payload = parse; cont }
@@ -115,7 +115,7 @@ let get_witness : type a. a witness -> a = function
 let to_pathspec x = to_pathspec_aux [] (Lazy.from_val x)
 
 let create_service_spec :
-    ?parse_session_id:(payload -> string) ->
+    ?parse_session_id:(payload -> string io) ->
     id:string ->
     my_role:string ->
     other_roles:string list ->
@@ -137,7 +137,7 @@ let create_service_spec :
       my_role;
       other_roles;
       parse_session_id =
-        (fun payload -> SessionId.create (parse_session_id payload));
+        (fun payload -> Monad.map SessionId.create (parse_session_id payload));
     }
   in
   { sv_spec = spec; sv_witness = get_witness witness }
