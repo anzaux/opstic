@@ -2,7 +2,7 @@ open Types
 open Server
 
 type nonrec payload = payload
-type 'a ep = { ep_raw : Server.session; ep_witness : 'a Lin.t }
+type 'a ep = { ep_raw : Session.t; ep_witness : 'a Lin.t }
 
 type _ inp_label =
   | InpLabel : {
@@ -15,7 +15,7 @@ type _ inp_label =
 and _ inp_role =
   | InpRole : {
       role_constr : ('a, 'l) Rows.constr;
-      path_spec : Server.path_spec;
+      path_spec : path_spec;
       parse_label : payload -> string io;
       labels : (string * 'l inp_label) list;
     }

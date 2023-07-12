@@ -7,8 +7,8 @@ module Server = Server
 module Mpst_js = struct
   type 'a service = { witness : 'a; service : Server.service }
 
-  let handle_request = Server.handle_entry
-  let create_server = Server.create_server
+  let handle_request = Server.handle_request
+  let create_server = Server.Server0.create
 
   (* let register_service t ~(witness : 'a) ~id ~my_role ~other_roles :
        'a service =

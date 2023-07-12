@@ -10,6 +10,9 @@ type service_spec = {
   parse_session_id : payload -> SessionId.t io;
 }
 
+type server
+type session
+type service
 type response = payload
 
 type request = {
@@ -18,39 +21,41 @@ type request = {
   request_resolv : response waiting;
 }
 
-type greeting_queue = request ConcurrentQueue.t
 type request_queue = request ConcurrentQueue.t
 type response_queue = response ConcurrentQueue.t
 type queues = { request_queue : request_queue; response_queue : response_queue }
+type greeting_queue = request ConcurrentQueue.t
+type invitation_queue = (session * request) ConcurrentQueue.t
 
-type session = {
-  session_id : session_id;
-  queues : (role, queues) Hashtbl.t;
-  service_ref : service;
-}
+module Server0 : sig
+  type t = server
 
-and invitation_queue = (session * request) ConcurrentQueue.t
-
-and service = {
-  spec : service_spec;
-  greetings : (path, greeting_queue) Hashtbl.t;
-  invitations : (path, invitation_queue) Hashtbl.t;
-  sessions : (session_id, session) Hashtbl.t;
-  server_ref : t;
-}
-
-and t = {
-  services : (ServiceId.t, service) Hashtbl.t;
-  service_path : (path, service_id) Hashtbl.t;
-}
-
-val create_server : unit -> t
-val register_service : t -> spec:service_spec -> unit
-val handle_entry : t -> path:string -> payload -> payload io
-val kill_session : session -> Monad.error -> unit
-val receive_at_paths : session -> path_spec list -> request io
-val accept_at_paths : service -> path_spec list -> (session * request) io
-
-module Util : sig
-  val get_session : t -> service_id -> session_id -> session io
+  val create : unit -> t
+  val service : t -> service_id -> service
+  val register_service : t -> spec:service_spec -> unit
+  val get_service : t -> path:path -> service io
 end
+
+module Service : sig
+  type t = service
+
+  val server : t -> Server0.t
+  val id : t -> service_id
+  val spec : t -> service_spec
+  val greeting_queue : t -> path:path -> greeting_queue
+  val invitation_queue : t -> path:path -> invitation_queue
+  val get_session : t -> session_id -> session io
+end
+
+module Session : sig
+  type t = session
+
+  val service : t -> Service.t
+  val id : t -> session_id
+  val queues : t -> role -> queues
+  val kill : t -> Monad.error -> unit
+end
+
+val handle_request : Server0.t -> path:string -> payload -> payload io
+val accept_at_paths : Service.t -> path_spec list -> (Session.t * request) io
+val receive_at_paths : Session.t -> path_spec list -> request io
