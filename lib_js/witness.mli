@@ -1,6 +1,7 @@
 open Types
+open ServerImpl
 
-type 'a ep = { ep_raw : Server.session; ep_witness : 'a Lin.t }
+type 'a ep = { ep_raw : Session.t; ep_witness : 'a Lin.t }
 
 type _ inp_label =
   | InpLabel : {
@@ -13,7 +14,7 @@ type _ inp_label =
 and _ inp_role =
   | InpRole : {
       role_constr : ('a, 'l) Rows.constr;
-      path_spec : Server.path_spec;
+      path_spec : path_spec;
       parse_label : Types.payload -> string io;
       labels : (string * 'l inp_label) list;
     }
@@ -40,9 +41,9 @@ and 'a witness =
   | Inp : 'a inp -> 'a inp witness
   | Close : unit witness
 
-type 'a service_spec = { sv_spec : Server.service_spec; sv_witness : 'a }
+type 'a service_spec = { sv_spec : ServerImpl.service_spec; sv_witness : 'a }
 
-val to_pathspec : 'a witness -> Server.path_spec list
+val to_pathspec : 'a witness -> path_spec list
 
 val create_service_spec :
   ?parse_session_id:(payload -> string io) ->

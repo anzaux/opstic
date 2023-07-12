@@ -1,5 +1,5 @@
 open Types
-open Server
+open ServerImpl
 
 type nonrec payload = payload
 type 'a ep = { ep_raw : Session.t; ep_witness : 'a Lin.t }
@@ -42,7 +42,7 @@ and 'a witness =
   | Inp : 'a inp -> 'a inp witness
   | Close : unit witness
 
-type 'a service_spec = { sv_spec : Server.service_spec; sv_witness : 'a }
+type 'a service_spec = { sv_spec : ServerImpl.service_spec; sv_witness : 'a }
 
 let parse_label_default payload =
   match Kxclib.Jv.pump_field "label" payload with
@@ -78,17 +78,15 @@ let make_inp inproles : 'a inp witness =
 type visited = path list (* paths *)
 
 let rec pathspec_out :
-    type obj. visited -> obj -> obj out_labels -> Server.path_spec list =
+    type obj. visited -> obj -> obj out_labels -> path_spec list =
  fun visited obj (Method meth) ->
   let out = meth.label (meth.role obj) in
   to_pathspec_aux visited out.out_cont
 
-and pathspec_inp_label : type l. visited -> l inp_label -> Server.path_spec list
-    =
+and pathspec_inp_label : type l. visited -> l inp_label -> path_spec list =
  fun visited (InpLabel inplab) -> to_pathspec_aux visited inplab.cont
 
-and pathspec_inp_role :
-    type var. visited -> var inp_role -> Server.path_spec list =
+and pathspec_inp_role : type var. visited -> var inp_role -> path_spec list =
  fun visited (InpRole inp : var inp_role) ->
   if List.mem inp.path_spec.path visited then []
   else
@@ -98,8 +96,7 @@ and pathspec_inp_role :
     in
     inp.path_spec :: pathspecs
 
-and to_pathspec_aux :
-    type a. visited -> a witness lazy_t -> Server.path_spec list =
+and to_pathspec_aux : type a. visited -> a witness lazy_t -> path_spec list =
  fun visited wit ->
   match Lazy.force wit with
   | Inp inp -> List.map snd inp |> List.concat_map (pathspec_inp_role visited)

@@ -2,13 +2,13 @@ open! Kxclib
 include Types
 module Monad = Monad
 module ConcurrentQueue = ConcurrentQueue
-module Server = Server
+module ServerImpl = ServerImpl
 
 module Mpst_js = struct
-  type 'a service = { witness : 'a; service : Server.service }
+  type 'a service = { witness : 'a; service : ServerImpl.service }
 
-  let handle_request = Server.handle_request
-  let create_server = Server.Server0.create
+  let handle_request = ServerImpl.handle_request
+  let create_server = ServerImpl.Server0.create
 
   (* let register_service t ~(witness : 'a) ~id ~my_role ~other_roles :
        'a service =
