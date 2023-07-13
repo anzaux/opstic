@@ -4,12 +4,13 @@ let generate (g : Gtype.t) : expression =
   let open Ast_builder.Default in
   let loc = g.loc in
   let err = pexp_extension ~loc @@ Location.error_extensionf ~loc "todo" in
-  match g.txt with
+  match g.txt.body with
   | LetRecG (_, _, _, _) -> estring ~loc (Gtype.show g)
-  | MessageG (_, _, _, _, _) -> estring ~loc (Gtype.show g)
-  (* | Routed (_, _, _, _, _, _) -> estring ~loc (Gtype.show g) *)
+  | MessageG (_, _, _, _, _, _) -> estring ~loc (Gtype.show g)
+  | Routed (_, _, _, _, _, _, _, _) -> estring ~loc (Gtype.show g)
   | CallG (_, _) -> estring ~loc (Gtype.show g)
   | EndG -> estring ~loc (Gtype.show g)
+  | PureLet (_, _, _) -> estring ~loc (Gtype.show g)
   | ChoiceG (_, _) -> err
   | ErrG msg -> pexp_extension ~loc @@ Location.error_extensionf ~loc "%s" msg
 
