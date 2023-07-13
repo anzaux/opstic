@@ -114,6 +114,7 @@ and pathspec_inp_role : type var. visited -> var inp_role -> path_spec list =
  fun visited (InpRole inp : var inp_role) ->
   if List.mem inp.path_spec.path visited then []
   else
+    let visited = inp.path_spec.path :: visited in
     let pathspecs =
       List.map snd inp.labels
       |> List.concat_map (fun inplabel -> pathspec_inp_label visited inplabel)
