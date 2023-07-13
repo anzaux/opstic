@@ -14,7 +14,6 @@ type endpoint = string loc [@@deriving show]
 type expr = Ast.expression
 
 type t_ =
-  | PureLet : var * expr * t -> t_
   | MessageG : role * label * endpoint * role * expr * t -> t_
   (* a#lab ==> b :: expr >> gtyp *)
   | Routed : role * label * endpoint * role * endpoint * role * expr * t -> t_
@@ -24,6 +23,7 @@ type t_ =
   | ErrG : string -> t_
   | LetRecG : pvar * var list * t * t -> t_ (* let rec f x y = .. in e *)
   | CallG : pvar * expr list -> t_ (* f e1 e2 .. *)
+(* | PureLet : var * expr * t -> t_ *)
 [@@deriving show]
 
 and t_id = { body : t_; id : string }
@@ -71,13 +71,6 @@ let rec parse (exp : expression) : t =
       (* sequencing *)
       parse_gtype_prefixed e (Some g)
   | [%expr
-      let [%p? pat] = [%e? e1] in
-      [%e? e2]] ->
-      let id =
-        Ast_pattern.(parse (ppat_var __') pat.ppat_loc pat (fun x -> x))
-      in
-      { txt = fresh @@ PureLet (id, e1, parse e2); loc = exp.pexp_loc }
-  | [%expr
       let rec [%p? pat] = [%e? e1] in
       [%e? e2]] ->
       (* recursive definition:
@@ -114,6 +107,13 @@ let rec parse (exp : expression) : t =
              f e1 e2 ... en
           *)
           parse_gtype_prefixed e None)
+  (* | [%expr
+      let [%p? pat] = [%e? e1] in
+      [%e? e2]] ->
+      let id =
+        Ast_pattern.(parse (ppat_var __') pat.ppat_loc pat (fun x -> x))
+      in
+      { txt = fresh @@ PureLet (id, e1, parse e2); loc = exp.pexp_loc } *)
   | _ -> err ~debug:"(gtype)" exp
 
 and parse_gtype_prefixed (exp : expression) (cont : expression option) : t =

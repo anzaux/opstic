@@ -1,7 +1,6 @@
 (* let x = 1 - 2 :: [] *)
 
 let%global x =
-  let x = [%endpoint ""] in
   let rec f x y =
     a#x = e => b :: (1 + 2);
     c#a = e2 => d :: "abc";
