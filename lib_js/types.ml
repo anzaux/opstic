@@ -10,8 +10,8 @@ module Role = Id.Make ()
 module Path = Id.Make ()
 
 type path_kind = [ `Greeting | `Invitation | `Established ]
-type session_id = SessionId.t [@@deriving show]
-type service_id = ServiceId.t [@@deriving show]
-type role = Role.t [@@deriving show]
-type path = Path.t [@@deriving show]
+type session_id = SessionId.t [@@deriving show, eq]
+type service_id = ServiceId.t [@@deriving show, eq]
+type role = Role.t [@@deriving show, eq]
+type path = Path.t [@@deriving show, eq]
 type 'a io = 'a Monad.t
