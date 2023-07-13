@@ -1,5 +1,7 @@
 open Types
 open ServerImpl
+open Kxclib
+open Monad
 
 type nonrec payload = payload
 type 'a ep = { ep_raw : Session.t; ep_witness : 'a Lin.t }
@@ -44,21 +46,40 @@ and 'a witness =
 
 type 'a service_spec = { sv_spec : ServerImpl.service_spec; sv_witness : 'a }
 
-let parse_label_default payload =
-  match Kxclib.Jv.pump_field "label" payload with
-  | `obj (("label", `str lab) :: _) -> Monad.return lab
-  | _ -> Monad.error_with "parse_label_default: no label"
-
 let parse_sessionid_default payload =
   match Kxclib.Jv.pump_field "session_id" payload with
   | `obj (("session_id", `str lab) :: _) -> Monad.return lab
-  | _ -> Monad.error_with "no label"
+  | _ -> Monad.error_with "no session id"
 
 let make_inp_label ~constr ~parse cont =
   InpLabel { label_constr = constr; parse_payload = parse; cont }
 
-let make_inp_role ?(path_kind = `Established)
-    ?(parse_label = parse_label_default) ~path ~constr labels =
+let parse_label_default : string list -> payload -> string io =
+ fun labels payload ->
+  let rec loop = function
+    | label :: ls -> (
+        match Jv.access [ `f label ] payload with
+        | Some _ -> return label
+        | None -> loop ls)
+    | [] ->
+        error_with
+          ("can't find labels " ^ String.concat "," labels ^ "from payload"
+         ^ Json.unparse payload)
+  in
+  loop labels
+
+let make_inp_role ?(path_kind = `Established) ?parse_label ~path ~constr labels
+    =
+  let parse_label =
+    match parse_label with
+    | Some f -> f
+    | None ->
+        let labels =
+          labels
+          |> List.map (fun (_, InpLabel lab) -> lab.label_constr.constr_name)
+        in
+        parse_label_default labels
+  in
   InpRole
     {
       path_spec =

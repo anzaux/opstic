@@ -130,11 +130,9 @@ module Service = struct
   let fresh_session_id () =
     SessionId.create (Int64.to_string (Random.bits64 ()))
 
-  let new_session_from_greeting ~service ~role request =
+  let new_session_from_greeting ~service request =
     let session_id = fresh_session_id () in
     let session = new_session service session_id in
-    let queues = Session.queues session role in
-    ConcurrentQueue.enqueue queues.request_queue request;
     Ok (session, request)
 
   let wait_at_paths service pathspecs =
@@ -142,9 +140,7 @@ module Service = struct
       match pathspec.path_kind with
       | `Greeting ->
           greeting_queue service ~path:pathspec
-          |> ConcurrentQueue.wrap
-               ~wrapper:
-                 (new_session_from_greeting ~service ~role:pathspec.path_role)
+          |> ConcurrentQueue.wrap ~wrapper:(new_session_from_greeting ~service)
       | `Invitation ->
           invitation_queue service ~path:pathspec |> ConcurrentQueue.nowrap
       | `Established ->

@@ -72,3 +72,4 @@ val make_outcore :
 val make_out : labels:'obj out_role_method list -> 'obj -> 'obj witness
 val close : unit witness
 val witness : 'a witness -> 'a
+val parse_label_default : string list -> payload -> string Monad.t

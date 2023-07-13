@@ -1,7 +1,5 @@
 open Prr
 
-exception AssertionError of string
-
 type 'x t = 'x Fut.or_error
 
 let return x = Fut.ok x
@@ -9,6 +7,17 @@ let return x = Fut.ok x
 let mpst_error msg =
   let open Prr in
   Jv.Error.v ~name:(Jstr.v "OpsticError") (Jstr.v msg)
+
+let error_to_string (err : Jv.Error.t) =
+  Format.asprintf "Exception %s: %s"
+    (Jv.Error.name err |> Jstr.to_string)
+    (Jv.Error.message err |> Jstr.to_string)
+
+let error_to_string_full (err : Jv.Error.t) =
+  Format.asprintf "Exception %s: %s\n%s"
+    (Jv.Error.name err |> Jstr.to_string)
+    (Jv.Error.message err |> Jstr.to_string)
+    (Jv.Error.stack err |> Jstr.to_string)
 
 let bind (m : _ t) (af : _ -> _ t) =
   Fut.bind m @@ function
@@ -34,3 +43,7 @@ let error_with msg =
 let handle_error ~handler f =
   let m = try f () with exn -> error_with (Printexc.to_string exn) in
   Fut.bind m (function Ok x -> return x | Error err -> handler err)
+
+let then_ f g =
+  let m = try f () with exn -> error_with (Printexc.to_string exn) in
+  Fut.bind m g

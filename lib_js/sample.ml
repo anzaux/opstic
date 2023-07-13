@@ -1,16 +1,34 @@
 open Types
 open Rows
-
-module Marshal = struct
-  let from_dyn : payload -> 'a = Obj.magic
-  let to_dyn : 'a -> payload = Obj.magic
-end
+open Monad
+open Kxclib
 
 [%%declare_constr a]
 [%%declare_constr b]
-[%%declare_constr lab]
-[%%declare_constr lab2]
-[%%declare_constr lab3]
+[%%declare_constr args]
+[%%declare_constr ans]
+[%%declare_constr err]
+
+let parse_x_y : payload -> (float * float) io =
+ fun payload ->
+  match payload |> Jv.(pump_field "y" &> pump_field "x") with
+  | `obj [ ("args", `obj [ ("x", `num x); ("y", `num y) ]) ] ->
+      Monad.return (x, y)
+  | _ -> error_with ("parse error: " ^ Json.unparse payload)
+
+let unparse_ans sessionid _label ans =
+  Monad.return
+  @@ `obj
+       [
+         ("sessionid", `str (SessionId.to_string sessionid)); ("ans", `num ans);
+       ]
+
+let unparse_msg sessionid _label msg =
+  Monad.return
+  @@ `obj
+       [
+         ("sessionid", `str (SessionId.to_string sessionid)); ("err", `str msg);
+       ]
 
 let sample1 () =
   let wit_a =
@@ -23,18 +41,18 @@ let sample1 () =
                 role_constr = b;
                 path_spec =
                   {
-                    path = Path.create "";
+                    path = Path.create "/adder";
                     path_kind = `Greeting;
                     path_role = Role.create "b";
                   };
-                parse_label = assert false;
+                parse_label = Witness.parse_label_default [ "args" ];
                 labels =
                   [
-                    ( "lab",
+                    ( "args",
                       InpLabel
                         {
-                          label_constr = lab;
-                          parse_payload = assert false;
+                          label_constr = args;
+                          parse_payload = parse_x_y;
                           cont =
                             Lazy.from_val
                               (Witness.make_out
@@ -43,31 +61,31 @@ let sample1 () =
                                      Method
                                        {
                                          role = (fun x -> x#b);
-                                         label = (fun x -> x#lab2);
+                                         label = (fun x -> x#ans);
                                        };
                                      Method
                                        {
                                          role = (fun x -> x#b);
-                                         label = (fun x -> x#lab3);
+                                         label = (fun x -> x#err);
                                        };
                                    ]
                                  (object
                                     method b =
                                       object
-                                        method lab2 =
+                                        method ans =
                                           {
                                             out_role = Role.create "b";
-                                            out_label = "lab2";
-                                            out_unparse = assert false;
+                                            out_label = "ans";
+                                            out_unparse = unparse_ans;
                                             out_cont =
                                               Lazy.from_val Witness.close;
                                           }
 
-                                        method lab3 =
+                                        method err =
                                           {
                                             out_role = Role.create "b";
-                                            out_label = "lab3";
-                                            out_unparse = assert false;
+                                            out_label = "err";
+                                            out_unparse = unparse_msg;
                                             out_cont =
                                               Lazy.from_val Witness.close;
                                           }
@@ -77,7 +95,7 @@ let sample1 () =
                   ];
               };
           ]
-      : [< `b of [< `lab of _ ] ] inp witness lazy_t)
+      : [< `b of [< `args of _ ] ] inp witness lazy_t)
     (* NB this type annotation is mandatory for session-type safety *)
   in
   Witness.create_service_spec ~id:"sample0" ~my_role:"a" ~other_roles:[ "b" ]

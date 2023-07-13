@@ -91,9 +91,24 @@ let close (ep : unit ep) =
 let start_service (type a) (t : Server.t) (spec : a inp Witness.service_spec)
     (f : a -> unit io) =
   let sv = register_service t spec in
+  let show_error err =
+    Kxclib.Log0.error "error in service %a: %s" ServiceId.pp
+      spec.sv_spec.service_id
+      (Monad.error_to_string_full err)
+  in
   let rec loop () =
-    let* var = accept t sv in
-    ignore (f var);
-    loop ()
+    Monad.then_
+      (fun () -> accept t sv)
+      (function
+        | Ok var ->
+            (fun () -> f var)
+            |> Monad.handle_error ~handler:(fun err ->
+                   show_error err;
+                   return ())
+            |> ignore;
+            loop ()
+        | Error err ->
+            show_error err;
+            loop ())
   in
   ignore (loop ())
