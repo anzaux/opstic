@@ -26,13 +26,13 @@ and 't out_role0 = {
   out_labels : (string * 't out_label0) list;
 }
 
-type inp_role = nondet inp_role0
-and out_role = nondet out_role0
+type inp_role1 = nondet inp_role0
+and out_role1 = nondet out_role0
 
 (* deterministic transition *)
 and det =
-  | DetInp of (string * inp_role) list
-  | DetOut of (string * out_role) list
+  | DetInp of (string * inp_role1) list
+  | DetOut of (string * out_role1) list
   | DetClose
 
 and nondet =
@@ -61,7 +61,7 @@ let assertfalse =
   [%expr fun _ -> assert false]
 
 let make_out_one (r : Gtype.role) (lab : Gtype.label) (_msg : expression)
-    (cont : nondet) : out_role =
+    (cont : nondet) : out_role1 =
   {
     out_role = r.txt;
     out_labels =
@@ -74,7 +74,7 @@ let make_out (state_id : state_id) (r : Gtype.role) (lab : Gtype.label)
     (state_id, Lazy.from_val @@ DetOut [ (r.txt, make_out_one r lab msg cont) ])
 
 let make_inp_one (r : Gtype.role) (lab : Gtype.label) (ep : Gtype.endpoint)
-    (_msg : expression) (cont : nondet) : inp_role =
+    (_msg : expression) (cont : nondet) : inp_role1 =
   {
     inp_role = r.txt;
     inp_endpoint = ep;
@@ -319,6 +319,11 @@ type t_ =
   | Goto of state_id
 
 and t = state_id * t_
+
+type inp_role = t inp_role0
+type inp_label = t inp_label0
+type out_role = t out_role0
+type out_label = t out_label0
 
 let map_inp_labels f (l, ({ inp_cont; _ } as i)) =
   (l, { i with inp_cont = f inp_cont })

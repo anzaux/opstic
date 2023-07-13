@@ -57,7 +57,7 @@ val make_inp_role :
   ?parse_label:(payload -> string io) ->
   path:path ->
   constr:('a, 'b) Rows.constr ->
-  (string * 'b inp_label) list ->
+  'b inp_label list ->
   'a inp_role
 
 val make_inp : 'a inp_role list -> 'a inp witness

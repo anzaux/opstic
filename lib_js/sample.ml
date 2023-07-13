@@ -35,64 +35,47 @@ let sample1 () =
     (Lazy.from_val
      @@ Witness.make_inp
           [
-            InpRole
-              {
-                role_constr = b;
-                path_spec =
-                  {
-                    path = Path.create "/adder";
-                    path_kind = `Greeting;
-                    path_role = Role.create "b";
-                  };
-                parse_label = Witness.parse_label_default [ "args" ];
-                labels =
-                  [
-                    ( "args",
-                      InpLabel
-                        {
-                          label_constr = args;
-                          parse_payload = parse_x_y;
-                          cont =
-                            Lazy.from_val
-                              (Witness.make_out
-                                 ~labels:
-                                   [
-                                     Method
-                                       {
-                                         role = (fun x -> x#b);
-                                         label = (fun x -> x#ans);
-                                       };
-                                     Method
-                                       {
-                                         role = (fun x -> x#b);
-                                         label = (fun x -> x#err);
-                                       };
-                                   ]
-                                 (object
-                                    method b =
-                                      object
-                                        method ans =
-                                          {
-                                            out_role = Role.create "b";
-                                            out_label = "ans";
-                                            out_unparse = unparse_ans;
-                                            out_cont =
-                                              Lazy.from_val Witness.close;
-                                          }
+            Witness.make_inp_role ~path_kind:`Greeting
+              ~parse_label:(Witness.parse_label_default [ "args" ])
+              ~path:(Path.create "/adder") ~constr:b
+              [
+                Witness.make_inp_label ~constr:args ~parse:parse_x_y
+                  (Lazy.from_val
+                     (Witness.make_out
+                        ~labels:
+                          [
+                            Method
+                              {
+                                role = (fun x -> x#b);
+                                label = (fun x -> x#ans);
+                              };
+                            Method
+                              {
+                                role = (fun x -> x#b);
+                                label = (fun x -> x#err);
+                              };
+                          ]
+                        (object
+                           method b =
+                             object
+                               method ans =
+                                 {
+                                   out_role = Role.create "b";
+                                   out_label = "ans";
+                                   out_unparse = unparse_ans;
+                                   out_cont = Lazy.from_val Witness.close;
+                                 }
 
-                                        method err =
-                                          {
-                                            out_role = Role.create "b";
-                                            out_label = "err";
-                                            out_unparse = unparse_msg;
-                                            out_cont =
-                                              Lazy.from_val Witness.close;
-                                          }
-                                      end
-                                 end));
-                        } );
-                  ];
-              };
+                               method err =
+                                 {
+                                   out_role = Role.create "b";
+                                   out_label = "err";
+                                   out_unparse = unparse_msg;
+                                   out_cont = Lazy.from_val Witness.close;
+                                 }
+                             end
+                        end)));
+              ];
           ]
       : [< `b of [< `args of _ ] ] inp witness lazy_t)
     (* NB this type annotation is mandatory for session-type safety *)

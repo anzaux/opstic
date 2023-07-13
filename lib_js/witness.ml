@@ -76,7 +76,7 @@ let make_inp_role ?(path_kind = `Established) ?parse_label ~path ~constr labels
     | None ->
         let labels =
           labels
-          |> List.map (fun (_, InpLabel lab) -> lab.label_constr.constr_name)
+          |> List.map (fun (InpLabel lab) -> lab.label_constr.constr_name)
         in
         parse_label_default labels
   in
@@ -86,7 +86,10 @@ let make_inp_role ?(path_kind = `Established) ?parse_label ~path ~constr labels
         { path_kind; path; path_role = Role.create constr.constr_name };
       role_constr = constr;
       parse_label;
-      labels;
+      labels =
+        List.map
+          (fun (InpLabel lab as i) -> (lab.label_constr.constr_name, i))
+          labels;
     }
 
 let make_inp roles : 'a inp witness =

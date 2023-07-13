@@ -32,4 +32,9 @@ type t_ =
 
 and t = state_id * t_
 
+type inp_role = t inp_role0
+type inp_label = t inp_label0
+type out_role = t out_role0
+type out_label = t out_label0
+
 val project : onto:Gtype.role -> Gtype.t -> t
