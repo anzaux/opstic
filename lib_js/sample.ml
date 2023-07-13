@@ -1,6 +1,6 @@
 open Types
 open Rows
-open Monad
+open Monad.Common
 open Kxclib
 
 [%%declare_constr a]
@@ -12,22 +12,21 @@ open Kxclib
 let parse_x_y : payload -> (float * float) io =
  fun payload ->
   match payload |> Jv.(pump_field "y" &> pump_field "x") with
-  | `obj [ ("args", `obj [ ("x", `num x); ("y", `num y) ]) ] ->
-      Monad.return (x, y)
-  | _ -> error_with ("parse error: " ^ Json.unparse payload)
+  | `obj [ ("args", `obj [ ("x", `num x); ("y", `num y) ]) ] -> return (x, y)
+  | _ -> Monad.error_with ("parse error: " ^ Json.unparse payload)
 
 let unparse_ans sessionid _label ans =
-  Monad.return
+  return
   @@ `obj
        [
-         ("sessionid", `str (SessionId.to_string sessionid)); ("ans", `num ans);
+         ("session_id", `str (SessionId.to_string sessionid)); ("ans", `num ans);
        ]
 
 let unparse_msg sessionid _label msg =
-  Monad.return
+  return
   @@ `obj
        [
-         ("sessionid", `str (SessionId.to_string sessionid)); ("err", `str msg);
+         ("session_id", `str (SessionId.to_string sessionid)); ("err", `str msg);
        ]
 
 let sample1 () =

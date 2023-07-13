@@ -1,12 +1,12 @@
 open! Types
-open! Monad
+open! Monad.Common
 
 let ( let* ) = Monad.bind
 
 let hash_find ~descr h k =
   match Hashtbl.find_opt h k with
   | Some x -> return x
-  | None -> error_with descr
+  | None -> Monad.error_with descr
 
 type path_spec = { path : path; path_kind : path_kind; path_role : role }
 

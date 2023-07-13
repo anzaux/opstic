@@ -47,3 +47,10 @@ let handle_error ~handler f =
 let then_ f g =
   let m = try f () with exn -> error_with (Printexc.to_string exn) in
   Fut.bind m g
+
+module Common = struct
+  type 'x io = 'x t
+
+  let return = return
+  let ( let* ) = bind
+end

@@ -13,3 +13,9 @@ val handle_error : handler:(error -> 'a t) -> (unit -> 'a t) -> 'a t
 val mpst_error : string -> error
 val error_to_string : Prr.Jv.Error.t -> string
 val error_to_string_full : Prr.Jv.Error.t -> string
+
+module Common : sig
+  type 'x io = 'x t
+  val return : 'x -> 'x t
+  val (let*) : 'x t -> ('x -> 'y t) -> 'y t
+end

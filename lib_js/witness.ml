@@ -1,7 +1,7 @@
 open Types
 open ServerImpl
 open Kxclib
-open Monad
+open Monad.Common
 
 type nonrec payload = payload
 type 'a ep = { ep_raw : Session.t; ep_witness : 'a Lin.t }
@@ -62,7 +62,7 @@ let parse_label_default : string list -> payload -> string io =
         | Some _ -> return label
         | None -> loop ls)
     | [] ->
-        error_with
+        Monad.error_with
           ("can't find labels " ^ String.concat "," labels ^ "from payload"
          ^ Json.unparse payload)
   in

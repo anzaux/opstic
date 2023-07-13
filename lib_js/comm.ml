@@ -1,9 +1,7 @@
 open Types
 open Witness
-open Monad
+open Monad.Common
 open ServerImpl
-
-let ( let* ) = bind
 
 type 'a ep = 'a Witness.ep = { ep_raw : Session.t; ep_witness : 'a Lin.t }
 type 'm inp = 'm Witness.inp
@@ -20,7 +18,7 @@ let parse_request : type a. a inp -> session -> request -> a io =
   let role = request.request_pathspec.path_role in
   let (InpRole role) = List.assoc role roles in
   if role.path_spec.path <> request.request_pathspec.path then
-    error_with
+    Monad.error_with
       (Format.asprintf
          "Path %a does not conform to the service %a at this point. Expected \
           next path: %a"
@@ -47,7 +45,7 @@ let process_request session (roles : _ inp) request =
     (fun () -> parse_request roles session request)
     |> Monad.handle_error ~handler:(fun err ->
            request.request_resolv (Error err);
-           error err)
+           Monad.error err)
   in
   ConcurrentQueue.add_waiter queue.response_queue request.request_resolv;
   return var
