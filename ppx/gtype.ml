@@ -10,15 +10,15 @@ type pvar = string loc [@@deriving show]
 type var = string loc [@@deriving show]
 type role = string loc [@@deriving show]
 type label = string [@@deriving show]
-type endpoint = string loc [@@deriving show]
 type expr = Ast.expression
+type endpoint = expr [@@deriving show]
 
 type t_ =
-  | MessageG : role * label * endpoint * role * expr * t -> t_
+  | MessageG : role * label * endpoint option * role * expr * t -> t_
   (* a#lab ==> b :: expr >> gtyp *)
   | Routed : role * label * endpoint * role * endpoint * role * expr * t -> t_
   (* a#lab = c ==> b :: expr >> gtyp *)
-  | ChoiceG : role * t list -> t_ (* a >>? [gtyp1; gtyp2; ..]*)
+  | ChoiceG : role * t list -> t_ (* a *>> [gtyp1; gtyp2; ..]*)
   | EndG : t_ (* end *)
   | ErrG : string -> t_
   | LetRecG : pvar * var list * t * t -> t_ (* let rec f x y = .. in e *)
@@ -60,6 +60,82 @@ let role_label_of_exp exp =
   (* split `r#label` into (r,label) *)
   Ast_pattern.(parse (pexp_send (pexp_ident (lident __')) __)) exp.pexp_loc exp
     (fun r lbl -> (r, lbl))
+
+let genvar =
+  let cnt = ref 0 in
+  fun () ->
+    let n = !cnt in
+    cnt := n + 1;
+    "v" ^ string_of_int n
+
+let loc = Location.none
+
+let rec make_parser_aux (exp : expression) :
+    string list * (pattern * expression) =
+  let open Ast_helper in
+  match exp with
+  | { pexp_desc = Pexp_constant c; _ } -> ([], (Pat.constant c, exp))
+  | { pexp_desc = Pexp_variant (c, Some arg); _ } ->
+      let vars, (pat, arg) = make_parser_aux arg in
+      ( vars,
+        ( Pat.variant c (Some pat),
+          { exp with pexp_desc = Pexp_variant (c, Some arg) } ) )
+  | { pexp_desc = Pexp_construct ({ txt = Longident.Lident "()"; _ }, _); _ } ->
+      ([], (Pat.any (), [%expr `obj []]))
+  | { pexp_desc = Pexp_construct (c, arg); _ } ->
+      let vars, (pat, arg) =
+        match arg with
+        | None -> ([], (Pat.construct c None, None))
+        | Some arg ->
+            let vars, (pat, arg) = make_parser_aux arg in
+            (vars, (Pat.construct c (Some pat), Some arg))
+      in
+      (vars, (pat, { exp with pexp_desc = Pexp_construct (c, arg) }))
+  | { pexp_desc = Pexp_tuple es; _ } ->
+      let vars, patargs = List.split @@ List.map make_parser_aux es in
+      let pats, args = List.split patargs in
+      ( List.concat vars,
+        (Pat.tuple pats, { exp with pexp_desc = Pexp_tuple args }) )
+  | [%expr __] ->
+      let var = genvar () in
+      ( [ var ],
+        ( Pat.var { txt = var; loc },
+          Exp.ident { txt = Longident.parse var; loc } ) )
+  | _ ->
+      failwith
+        (Format.asprintf "cannot handle message: %a" Pprintast.expression exp)
+
+let make_unparser exp =
+  let open Ast_helper in
+  let vars, (_, exp) = make_parser_aux exp in
+  let pat =
+    if List.length vars = 0 then [%pat? ()]
+    else if List.length vars = 1 then Pat.var { txt = List.hd vars; loc }
+    else Pat.tuple (List.map (fun var -> Pat.var { txt = var; loc }) vars)
+  in
+  [%expr
+    fun _sessionid _label ->
+      [%e Exp.fun_ Nolabel None pat [%expr Monad.return [%e exp]]]]
+
+let make_parser exp =
+  let open Ast_helper in
+  let vars, (pat, _) = make_parser_aux exp in
+  let tup =
+    if List.length vars = 0 then [%expr ()]
+    else if List.length vars = 1 then
+      Exp.ident { txt = Longident.parse (List.hd vars); loc }
+    else
+      Exp.tuple
+        (List.map
+           (fun var -> Exp.ident { txt = Longident.parse var; loc })
+           vars)
+  in
+  let dflt =
+    match pat.ppat_desc with
+    | Ppat_any -> []
+    | _ -> [ Exp.case (Pat.any ()) [%expr Monad.error_with "can't parse"] ]
+  in
+  Exp.function_ (Exp.case pat [%expr Monad.return [%e tup]] :: dflt)
 
 let rec parse (exp : expression) : t =
   match exp with
@@ -128,17 +204,19 @@ and parse_gtype_prefixed (exp : expression) (cont : expression option) : t =
         => [%e? r2] :: [%e? payload]] ->
         (* r1 # lbl = s => r2 :: payload *)
         let r1, lbl = role_label_of_exp r1_lbl in
-        let e1 = endpoint_of_exp e1 in
         let s = role_of_exp s in
-        let e2 = endpoint_of_exp e2 in
         let r2 = role_of_exp r2 in
         fresh @@ Routed (r1, lbl, e1, s, e2, r2, payload, parse_cont ())
-    | [%expr [%e? r1_lbl] = [%e? e] => [%e? r2] :: [%e? payload]] ->
+    | [%expr [%e? r1_lbl] = [%e? ep] => [%e? r2] :: [%e? payload]] ->
         (* r1 # lbl ==> r2 :: payload *)
         let r1, lbl = role_label_of_exp r1_lbl in
-        let e = endpoint_of_exp e in
         let r2 = role_of_exp r2 in
-        fresh @@ MessageG (r1, lbl, e, r2, payload, parse_cont ())
+        fresh @@ MessageG (r1, lbl, Some ep, r2, payload, parse_cont ())
+    | [%expr [%e? r1_lbl] ==> [%e? r2] :: [%e? payload]] ->
+        (* r1 # lbl ==> r2 :: payload *)
+        let r1, lbl = role_label_of_exp r1_lbl in
+        let r2 = role_of_exp r2 in
+        fresh @@ MessageG (r1, lbl, None, r2, payload, parse_cont ())
     | { pexp_desc = Pexp_apply (body, args); _ } ->
         let args = List.rev_map (fun (_, arg) -> arg) args in
         parse_gtype_call body args

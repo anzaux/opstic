@@ -11,7 +11,6 @@ type 't inp_label0 = {
 and 't inp_role0 = {
   inp_role : string;
   inp_endpoint : Gtype.endpoint;
-  inp_parse_label : expression;
   inp_labels : (string * 't inp_label0) list;
 }
 
@@ -56,16 +55,19 @@ let union_ids xs ys =
   let m = add_all m ys in
   m |> M.to_seq |> Seq.map fst |> List.of_seq
 
-let assertfalse =
-  let loc = Location.none in
-  [%expr fun _ -> assert false]
-
-let make_out_one (r : Gtype.role) (lab : Gtype.label) (_msg : expression)
+let make_out_one (r : Gtype.role) (lab : Gtype.label) (msg : expression)
     (cont : nondet) : out_role1 =
   {
     out_role = r.txt;
     out_labels =
-      [ (lab, { out_label = lab; out_unparse = assertfalse; out_cont = cont }) ];
+      [
+        ( lab,
+          {
+            out_label = lab;
+            out_unparse = Gtype.make_unparser msg;
+            out_cont = cont;
+          } );
+      ];
   }
 
 let make_out (state_id : state_id) (r : Gtype.role) (lab : Gtype.label)
@@ -73,22 +75,26 @@ let make_out (state_id : state_id) (r : Gtype.role) (lab : Gtype.label)
   Det
     (state_id, Lazy.from_val @@ DetOut [ (r.txt, make_out_one r lab msg cont) ])
 
-let make_inp_one (r : Gtype.role) (lab : Gtype.label) (ep : Gtype.endpoint)
-    (_msg : expression) (cont : nondet) : inp_role1 =
+let make_inp_one (r : Gtype.role) (lab : Gtype.label)
+    (ep : Gtype.endpoint option) (msg : expression) (cont : nondet) : inp_role1
+    =
+  let ep = match ep with None -> failwith "no endpoint" | Some ep -> ep in
   {
     inp_role = r.txt;
     inp_endpoint = ep;
-    inp_parse_label = assertfalse;
     inp_labels =
       [
         ( lab,
-          { inp_label = lab; inp_parse_payload = assertfalse; inp_cont = cont }
-        );
+          {
+            inp_label = lab;
+            inp_parse_payload = Gtype.make_parser msg;
+            inp_cont = cont;
+          } );
       ];
   }
 
 let make_inp (state_id : state_id) (r : Gtype.role) (lab : Gtype.label)
-    (ep : Gtype.endpoint) (msg : expression) (cont : nondet) : nondet =
+    (ep : Gtype.endpoint option) (msg : expression) (cont : nondet) : nondet =
   Det
     ( state_id,
       Lazy.from_val @@ DetInp [ (r.txt, make_inp_one r lab ep msg cont) ] )
@@ -148,8 +154,6 @@ let merge_inp inp1 inp2 =
   let merge_inp_role i1 i2 =
     assert (i1.inp_role = i2.inp_role);
     if i1.inp_endpoint <> i2.inp_endpoint then failwith "endpoints differs"
-    else if i1.inp_parse_label <> i2.inp_parse_label then
-      failwith "label parse functions differ"
     else { i1 with inp_labels = merge_inp_labels i1.inp_labels i2.inp_labels }
   in
   if same_indices inp1 inp2 then
@@ -325,6 +329,66 @@ type inp_label = t inp_label0
 type out_role = t out_role0
 type out_label = t out_label0
 
+let rec occurs state_id (cur, t) =
+  if state_id = cur then true
+  else
+    match t with
+    | Inp inp ->
+        let inplab (_, i) = occurs state_id i.inp_cont in
+        let inprole (_, i) = List.exists inplab i.inp_labels in
+        List.exists inprole inp
+    | Out out ->
+        let outlab (_, i) = occurs state_id i.out_cont in
+        let outrole (_, i) = List.exists outlab i.out_labels in
+        List.exists outrole out
+    | Close -> false
+    | Goto _ -> false
+
+let rec roles (_, t) : string list =
+  let add xs x = if List.mem x xs then xs else x :: xs in
+  match t with
+  | Inp inp ->
+      let inplab (_, i) = roles i.inp_cont in
+      let inprole (r, i) = r :: List.concat_map inplab i.inp_labels in
+      let roles = List.concat_map inprole inp in
+      List.fold_left add [] roles
+  | Out out ->
+      let outlab (_, i) = roles i.out_cont in
+      let outrole (r, i) = r :: List.concat_map outlab i.out_labels in
+      let roles = List.concat_map outrole out in
+      List.fold_left add [] roles
+  | Close -> []
+  | Goto _ -> []
+
+let show_state_id = String.concat "_"
+
+let rec show : t -> string =
+ fun (state_id, t) ->
+  let prefix =
+    if occurs state_id ([ "" ], t) then "mu " ^ show_state_id state_id ^ "."
+    else ""
+  in
+  let body =
+    match t with
+    | Inp inp ->
+        let inplab (l, i) = l ^ ":" ^ show i.inp_cont in
+        let inprole (r, i) =
+          let labels = List.map inplab i.inp_labels |> String.concat ", " in
+          r ^ " ? {" ^ labels ^ "}"
+        in
+        inp |> List.map inprole |> String.concat " & "
+    | Out out ->
+        let outlab (l, o) = l ^ ":" ^ show o.out_cont in
+        let outrole (r, o) =
+          let labels = List.map outlab o.out_labels |> String.concat ", " in
+          r ^ " ! {" ^ labels ^ "}"
+        in
+        out |> List.map outrole |> String.concat " + "
+    | Close -> "0"
+    | Goto goto_id -> show_state_id goto_id
+  in
+  prefix ^ body
+
 let map_inp_labels f (l, ({ inp_cont; _ } as i)) =
   (l, { i with inp_cont = f inp_cont })
 
@@ -339,9 +403,9 @@ let map_out_role f (r, ({ out_labels; _ } as o)) =
 
 let rec conv ~seen = function
   | Det (state_id, det) -> (
-      let seen = state_id :: seen in
       if List.mem state_id seen then (state_id, Goto state_id)
       else
+        let seen = state_id :: seen in
         match Lazy.force det with
         | DetInp inp ->
             (state_id, Inp (List.map (map_inp_role (conv ~seen)) inp))

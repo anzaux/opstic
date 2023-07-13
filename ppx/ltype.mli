@@ -9,7 +9,6 @@ type 't inp_label0 = {
 and 't inp_role0 = {
   inp_role : string;
   inp_endpoint : Gtype.endpoint;
-  inp_parse_label : Parsetree.expression;
   inp_labels : (string * 't inp_label0) list;
 }
 
@@ -37,4 +36,6 @@ type inp_label = t inp_label0
 type out_role = t out_role0
 type out_label = t out_label0
 
+val roles : t -> string list
 val project : onto:Gtype.role -> Gtype.t -> t
+val show : t -> string

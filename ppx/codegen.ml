@@ -28,12 +28,11 @@ let make_meta_methods out = List.concat_map make_meta_methods0 out |> make_list
 let make_label_method role (outlabel : Ltype.out_label) =
   let exp =
     [%expr
-      {
-        out_role = Role.create [%e Const.string role |> Exp.constant];
-        out_label = [%e Const.string outlabel.out_label |> Exp.constant];
-        out_unparse = [%e outlabel.out_unparse];
-        out_cont = [%e gen_ident (fst outlabel.out_cont)];
-      }]
+      Witness.make_outcore
+        ~role:(Role.create [%e Const.string role |> Exp.constant])
+        ~label:[%e Const.string outlabel.out_label |> Exp.constant]
+        ~unparse:[%e outlabel.out_unparse]
+        [%e gen_ident (fst outlabel.out_cont)]]
   in
   Cf.method_
     { txt = outlabel.out_label; loc }
@@ -72,10 +71,14 @@ let make_inp_label ((l, inplabel) : string * Ltype.inp_label) =
       [%e gen_ident (fst inplabel.inp_cont)]]
 
 let make_inp_role ((r, inprole) : string * Ltype.inp_role) =
+  let labels =
+    List.map fst inprole.inp_labels
+    |> List.map (fun x -> x |> Const.string |> Exp.constant)
+  in
   [%expr
     Witness.make_inp_role ~path_kind:`Greeting
-      ~parse_label:(Witness.parse_label_default [ "args" ])
-      ~path:(Path.create "/adder")
+      ~parse_label:(Witness.parse_label_default [%e make_list labels])
+      ~path:(Path.create [%e inprole.inp_endpoint])
       ~constr:
         [%rows_make_constr [%e Exp.ident { txt = Longident.parse r; loc }]]
       [%e make_list (List.map make_inp_label inprole.inp_labels)]]
@@ -83,7 +86,7 @@ let make_inp_role ((r, inprole) : string * Ltype.inp_role) =
 let make_inp (inp : (string * Ltype.inp_role) list) =
   [%expr lazy (Witness.make_inp [%e make_list (List.map make_inp_role inp)])]
 
-let make_close = [%expr Lazy.from_val Witness.Close]
+let make_close = [%expr lazy Witness.close]
 
 let rec gen_binding : seen:Ltype.state_id list -> Ltype.t -> value_binding list
     =
@@ -106,8 +109,19 @@ let rec gen_binding : seen:Ltype.state_id list -> Ltype.t -> value_binding list
         in
         mkbind (make_inp inp) :: List.concat_map proc_role inp
     | Close -> [ mkbind make_close ]
-    | Goto goto_id -> [ mkbind (gen_ident goto_id) ]
+    | Goto goto_id ->
+        [ mkbind [%expr lazy (Lazy.force [%e gen_ident goto_id])] ]
 
-let make_witness : Ltype.t -> expression =
- fun ((state_id, _) as t) ->
-  Exp.let_ Recursive (gen_binding ~seen:[] t) (gen_ident state_id)
+let make_witness : string -> Gtype.role -> Ltype.t -> expression =
+ fun service_id role ((state_id, _) as t) ->
+  let service_id = Exp.constant @@ Const.string service_id in
+  let my_role = Exp.constant @@ Const.string role.txt in
+  let other_roles = Ltype.roles t |> List.filter (fun r -> r <> role.txt) in
+  let other_roles =
+    List.map (fun r -> Exp.constant @@ Const.string r) other_roles |> make_list
+  in
+  let wit = Exp.let_ Recursive (gen_binding ~seen:[] t) (gen_ident state_id) in
+  [%expr
+    let wit = [%e wit] in
+    Witness.create_service_spec ~id:[%e service_id] ~my_role:[%e my_role]
+      ~other_roles:[%e other_roles] (Lazy.force wit)]
