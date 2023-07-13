@@ -1,7 +1,7 @@
 open Types
-open ServerImpl
 
-type 'a ep = { ep_raw : Session.t; ep_witness : 'a Lin.t }
+type 'a ep = { ep_raw : ServerImpl.session; ep_witness : 'a Lin.t }
+type 'a service_spec = { sv_spec : ServerImpl.service_spec; sv_witness : 'a }
 
 type _ inp_label =
   | InpLabel : {
@@ -14,7 +14,7 @@ type _ inp_label =
 and _ inp_role =
   | InpRole : {
       role_constr : ('a, 'l) Rows.constr;
-      path_spec : path_spec;
+      path_spec : ServerImpl.path_spec;
       parse_label : Types.payload -> string io;
       labels : (string * 'l inp_label) list;
     }
@@ -29,21 +29,14 @@ and ('v, 'a) out = {
   out_cont : 'a witness lazy_t;
 }
 
-and 'obj out_labels =
+and 'obj out_role_method =
   | Method : {
       role : 'obj -> 'm;
       label : 'm -> ('v, 'a) out;
     }
-      -> 'obj out_labels
+      -> 'obj out_role_method
 
-and 'a witness =
-  | Out : { obj : 'obj; labels : 'obj out_labels list } -> 'obj witness
-  | Inp : 'a inp -> 'a inp witness
-  | Close : unit witness
-
-type 'a service_spec = { sv_spec : ServerImpl.service_spec; sv_witness : 'a }
-
-val to_pathspec : 'a witness -> path_spec list
+and 'a witness
 
 val create_service_spec :
   ?parse_session_id:(payload -> string io) ->
@@ -69,11 +62,13 @@ val make_inp_role :
 
 val make_inp : 'a inp_role list -> 'a inp witness
 
-val make_out :
+val make_outcore :
   role:Role.t ->
   label:string ->
   unparse:(session_id -> string -> 'a -> Types.payload io) ->
   'b witness lazy_t ->
   ('a, 'b) out
 
+val make_out : labels:'obj out_role_method list -> 'obj -> 'obj witness
+val close : unit witness
 val witness : 'a witness -> 'a

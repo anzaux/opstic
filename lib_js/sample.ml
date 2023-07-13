@@ -16,68 +16,66 @@ let sample1 () =
   let wit_a =
     let open Witness in
     (Lazy.from_val
-     @@ Inp
+     @@ make_inp
           [
-            ( Role.create "b",
-              InpRole
-                {
-                  role_constr = b;
-                  path_spec =
-                    {
-                      path = Path.create "";
-                      path_kind = `Greeting;
-                      path_role = Role.create "b";
-                    };
-                  parse_label = assert false;
-                  labels =
-                    [
-                      ( "lab",
-                        InpLabel
-                          {
-                            label_constr = lab;
-                            parse_payload = assert false;
-                            cont =
-                              Lazy.from_val
-                                (Out
-                                   {
-                                     labels =
-                                       [
-                                         Method
-                                           {
-                                             role = (fun x -> x#b);
-                                             label = (fun x -> x#lab2);
-                                           };
-                                         Method
-                                           {
-                                             role = (fun x -> x#b);
-                                             label = (fun x -> x#lab3);
-                                           };
-                                       ];
-                                     obj =
-                                       object
-                                         method b =
-                                           object
-                                             method lab2 =
-                                               {
-                                                 out_role = Role.create "b";
-                                                 out_label = "lab2";
-                                                 out_unparse = assert false;
-                                                 out_cont = Lazy.from_val Close;
-                                               }
+            InpRole
+              {
+                role_constr = b;
+                path_spec =
+                  {
+                    path = Path.create "";
+                    path_kind = `Greeting;
+                    path_role = Role.create "b";
+                  };
+                parse_label = assert false;
+                labels =
+                  [
+                    ( "lab",
+                      InpLabel
+                        {
+                          label_constr = lab;
+                          parse_payload = assert false;
+                          cont =
+                            Lazy.from_val
+                              (Witness.make_out
+                                 ~labels:
+                                   [
+                                     Method
+                                       {
+                                         role = (fun x -> x#b);
+                                         label = (fun x -> x#lab2);
+                                       };
+                                     Method
+                                       {
+                                         role = (fun x -> x#b);
+                                         label = (fun x -> x#lab3);
+                                       };
+                                   ]
+                                 (object
+                                    method b =
+                                      object
+                                        method lab2 =
+                                          {
+                                            out_role = Role.create "b";
+                                            out_label = "lab2";
+                                            out_unparse = assert false;
+                                            out_cont =
+                                              Lazy.from_val Witness.close;
+                                          }
 
-                                             method lab3 =
-                                               {
-                                                 out_role = Role.create "b";
-                                                 out_label = "lab3";
-                                                 out_unparse = assert false;
-                                                 out_cont = Lazy.from_val Close;
-                                               }
-                                           end
-                                       end;
-                                   });
-                          } );
-                    ];
-                } );
+                                        method lab3 =
+                                          {
+                                            out_role = Role.create "b";
+                                            out_label = "lab3";
+                                            out_unparse = assert false;
+                                            out_cont =
+                                              Lazy.from_val Witness.close;
+                                          }
+                                      end
+                                 end));
+                        } );
+                  ];
+              };
           ]
       : [< `b of [< `lab of _ ] ] inp witness lazy_t)
     (* NB this type annotation is mandatory for session-type safety *)

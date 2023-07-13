@@ -1,13 +1,14 @@
 open Types
 open Witness
-open ServerImpl
 open Monad
+open ServerImpl
 
 let ( let* ) = bind
 
 type 'a ep = 'a Witness.ep = { ep_raw : Session.t; ep_witness : 'a Lin.t }
 type 'm inp = 'm Witness.inp
 type ('v, 'a) out = ('v, 'a) Witness.out
+type 'x service_spec = 'x Witness.service_spec
 type 'x service = { sv_service_id : service_id; sv_witness : 'x }
 
 let register_service t spec =
@@ -15,26 +16,35 @@ let register_service t spec =
   { sv_service_id = spec.sv_spec.service_id; sv_witness = spec.sv_witness }
 
 let parse_request : type a. a inp -> session -> request -> a io =
- fun (inproles : _ inp) session request ->
+ fun (roles : _ inp) session request ->
   let role = request.request_pathspec.path_role in
-  let (InpRole inprole) = List.assoc role inproles in
-  let* label = inprole.parse_label request.request_body in
-  let (InpLabel inplabel) = List.assoc label inprole.labels in
-  let* payload = inplabel.parse_payload request.request_body in
-  return
-  @@ inprole.role_constr.make_var
-       (inplabel.label_constr.make_var
-          ( payload,
-            {
-              ep_raw = session;
-              ep_witness =
-                Lin.create (Witness.witness (Lazy.force inplabel.cont));
-            } ))
+  let (InpRole role) = List.assoc role roles in
+  if role.path_spec.path <> request.request_pathspec.path then
+    error_with
+      (Format.asprintf
+         "Path %a does not conform to the service %a at this point. Expected \
+          next path: %a"
+         Path.pp request.request_pathspec.path ServiceId.pp
+         (session |> Session.service |> Service.id)
+         Path.pp role.path_spec.path)
+  else
+    let* label = role.parse_label request.request_body in
+    let (InpLabel label) = List.assoc label role.labels in
+    let* payload = label.parse_payload request.request_body in
+    return
+    @@ role.role_constr.make_var
+         (label.label_constr.make_var
+            ( payload,
+              {
+                ep_raw = session;
+                ep_witness =
+                  Lin.create (Witness.witness (Lazy.force label.cont));
+              } ))
 
-let process_request session (inproles : _ inp) request =
+let process_request session (roles : _ inp) request =
   let queue = Session.queues session request.request_pathspec.path_role in
   let* var =
-    (fun () -> parse_request inproles session request)
+    (fun () -> parse_request roles session request)
     |> Monad.handle_error ~handler:(fun err ->
            request.request_resolv (Error err);
            error err)
@@ -44,21 +54,17 @@ let process_request session (inproles : _ inp) request =
 
 let accept : type a. Server.t -> a inp service -> a io =
  fun t { sv_service_id; sv_witness = inp } ->
-  let pathspecs =
-    inp |> List.map (fun (_, InpRole inprole) -> inprole.path_spec)
-  in
+  let pathspecs = inp |> List.map (fun (_, InpRole role) -> role.path_spec) in
   let service = Server.service t sv_service_id in
   let* session, request = Comm.accept_at_paths service pathspecs in
   process_request session inp request
 
 let receive : 'a inp ep -> 'a io =
  fun ep ->
-  let inproles = Lin.get ep.ep_witness in
-  let pathspecs =
-    inproles |> List.map (fun (_, InpRole inprole) -> inprole.path_spec)
-  in
+  let roles = Lin.get ep.ep_witness in
+  let pathspecs = roles |> List.map (fun (_, InpRole role) -> role.path_spec) in
   let* request = Comm.receive_at_paths ep.ep_raw pathspecs in
-  process_request ep.ep_raw inproles request
+  process_request ep.ep_raw roles request
 
 let send : 'a 'b. 'a ep -> ('a -> ('v, 'b) out) -> 'v -> 'b ep io =
  fun ep call v ->

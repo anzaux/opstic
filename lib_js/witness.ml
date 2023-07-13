@@ -30,15 +30,15 @@ and ('v, 'a) out = {
   out_cont : 'a witness lazy_t;
 }
 
-and 'obj out_labels =
+and 'obj out_role_method =
   | Method : {
       role : 'obj -> 'm;
       label : 'm -> ('v, 'a) out;
     }
-      -> 'obj out_labels
+      -> 'obj out_role_method
 
 and 'a witness =
-  | Out : { obj : 'obj; labels : 'obj out_labels list } -> 'obj witness
+  | Out : { obj : 'obj; labels : 'obj out_role_method list } -> 'obj witness
   | Inp : 'a inp -> 'a inp witness
   | Close : unit witness
 
@@ -68,17 +68,17 @@ let make_inp_role ?(path_kind = `Established)
       labels;
     }
 
-let make_inp inproles : 'a inp witness =
+let make_inp roles : 'a inp witness =
   Inp
     (List.map
-       (fun (InpRole inprole as i) ->
-         (Role.create inprole.role_constr.constr_name, i))
-       inproles)
+       (fun (InpRole role as i) ->
+         (Role.create role.role_constr.constr_name, i))
+       roles)
 
 type visited = path list (* paths *)
 
 let rec pathspec_out :
-    type obj. visited -> obj -> obj out_labels -> path_spec list =
+    type obj. visited -> obj -> obj out_role_method -> path_spec list =
  fun visited obj (Method meth) ->
   let out = meth.label (meth.role obj) in
   to_pathspec_aux visited out.out_cont
@@ -139,8 +139,11 @@ let create_service_spec :
   in
   { sv_spec = spec; sv_witness = get_witness witness }
 
-let make_out ~role ~label ~unparse next =
+let make_outcore ~role ~label ~unparse next =
   { out_role = role; out_label = label; out_unparse = unparse; out_cont = next }
+
+let make_out ~labels obj = Out { labels; obj }
+let close = Close
 
 let witness : type a. a witness -> a = function
   | Out out -> out.obj
