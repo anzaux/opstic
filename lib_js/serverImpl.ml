@@ -177,7 +177,7 @@ module Server = struct
         promise
 end
 
-module Comm = struct
+module Core = struct
   let fresh_session_id () =
     SessionId.create (Int64.to_string (Random.bits64 ()))
 

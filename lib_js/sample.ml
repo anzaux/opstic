@@ -16,7 +16,7 @@ let sample1 () =
   let wit_a =
     let open Witness in
     (Lazy.from_val
-     @@ make_inp
+     @@ Witness.make_inp
           [
             InpRole
               {

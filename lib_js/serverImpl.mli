@@ -57,7 +57,7 @@ module Session : sig
   val kill : t -> Monad.error -> unit
 end
 
-module Comm : sig
+module Core : sig
   val accept_at_paths : Service.t -> path_spec list -> (Session.t * request) io
   val receive_at_paths : Session.t -> path_spec list -> request io
 end

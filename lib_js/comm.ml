@@ -56,14 +56,14 @@ let accept : type a. Server.t -> a inp service -> a io =
  fun t { sv_service_id; sv_witness = inp } ->
   let pathspecs = inp |> List.map (fun (_, InpRole role) -> role.path_spec) in
   let service = Server.service t sv_service_id in
-  let* session, request = Comm.accept_at_paths service pathspecs in
+  let* session, request = Core.accept_at_paths service pathspecs in
   process_request session inp request
 
 let receive : 'a inp ep -> 'a io =
  fun ep ->
   let roles = Lin.get ep.ep_witness in
   let pathspecs = roles |> List.map (fun (_, InpRole role) -> role.path_spec) in
-  let* request = Comm.receive_at_paths ep.ep_raw pathspecs in
+  let* request = Core.receive_at_paths ep.ep_raw pathspecs in
   process_request ep.ep_raw roles request
 
 let send : 'a 'b. 'a ep -> ('a -> ('v, 'b) out) -> 'v -> 'b ep io =
@@ -96,4 +96,4 @@ let start_service (type a) (t : Server.t) (spec : a inp Witness.service_spec)
     ignore (f var);
     loop ()
   in
-  loop ()
+  ignore (loop ())
