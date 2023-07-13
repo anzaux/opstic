@@ -1,8 +1,9 @@
 open! Kxclib
+open! Js_of_ocaml
 
 type 'a ok_or_error = ('a, Monad.error) result
 type 'a waiting = 'a ok_or_error -> unit
-type payload = Json.jv
+type payload = Kxclib.Json.jv
 
 module SessionId = Id.Make ()
 module ServiceId = Id.Make ()
@@ -15,3 +16,4 @@ type service_id = ServiceId.t [@@deriving show, eq]
 type role = Role.t [@@deriving show, eq]
 type path = Path.t [@@deriving show, eq]
 type 'a io = 'a Monad.t
+type express_req_type = Prr.Jv.t

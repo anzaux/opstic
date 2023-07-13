@@ -18,6 +18,7 @@ type response = payload
 type request = {
   request_pathspec : path_spec;
   request_body : payload;
+  request_raw : express_req_type;
   request_resolv : response waiting;
 }
 
@@ -34,7 +35,9 @@ module Server : sig
   val service : t -> service_id -> service
   val register_service : t -> spec:service_spec -> unit
   val get_service : t -> path:path -> service io
-  val handle_request : t -> path:string -> payload -> payload io
+
+  val handle_request :
+    t -> path:string -> payload -> express_req_type -> payload io
 end
 
 module Service : sig
@@ -43,9 +46,10 @@ module Service : sig
   val server : t -> Server.t
   val id : t -> service_id
   val spec : t -> service_spec
-  val greeting_queue : t -> path:path -> greeting_queue
-  val invitation_queue : t -> path:path -> invitation_queue
+  val greeting_queue : t -> path:path_spec -> greeting_queue
+  val invitation_queue : t -> path:path_spec -> invitation_queue
   val get_session : t -> session_id -> session io
+  val wait_at_paths : t -> path_spec list -> (session * request) io
 end
 
 module Session : sig
@@ -55,9 +59,5 @@ module Session : sig
   val id : t -> session_id
   val queues : t -> role -> queues
   val kill : t -> Monad.error -> unit
-end
-
-module Core : sig
-  val accept_at_paths : Service.t -> path_spec list -> (Session.t * request) io
-  val receive_at_paths : Session.t -> path_spec list -> request io
+  val wait_at_paths : t -> path_spec list -> request io
 end

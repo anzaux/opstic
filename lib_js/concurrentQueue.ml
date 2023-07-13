@@ -32,6 +32,12 @@ let return = Monad.return
 let create () = ref EmptyNotWaiting
 let invalidate_waiter (Waiter r) = r.waiting := None
 
+let is_empty { contents = t } =
+  match t with
+  | EmptyNotWaiting | EmptyWaiting _ -> true
+  | Queued _ -> false
+  | Killed _ -> true
+
 let wrap_waiting (type a b) (waiting : a waiting) (f : b -> a ok_or_error) :
     b waiting = function
   | Ok x -> waiting (f x)
@@ -145,7 +151,8 @@ let kill t err =
       Kxclib.Log0.warn "Non-empty concurrent queue is killed with error";
       ()
 
-let wrap q f = Wrapped { queue = q; wrap = f }
+let wrap q ~wrapper = Wrapped { queue = q; wrap = wrapper }
+let nowrap q = Wrapped { queue = q; wrap = (fun x -> Ok x) }
 
 let dequeue_one_of_wrapped ts =
   let promise, resolv_f = Monad.create_promise () in
