@@ -37,7 +37,7 @@ and det =
 and nondet =
   | Det of state_id * det lazy_t
   | Merge of nondet list
-  | Concat of state_id * nondet list
+  | Concat of nondet list
   | Lazy of nondet lazy_t
 
 exception UnguardedLoop
@@ -157,7 +157,8 @@ let merge_inp inp1 inp2 =
     else { i1 with inp_labels = merge_inp_labels i1.inp_labels i2.inp_labels }
   in
   if same_indices inp1 inp2 then
-    List.fold_right (merge_exactly_same merge_inp_role) inp1 inp2
+    let merge_one = merge_exactly_same merge_inp_role in
+    List.fold_right merge_one inp1 inp2
   else failwith "role sets differ"
 
 let merge_det_head : det -> det -> det =
@@ -201,52 +202,48 @@ let filter_self_cycles self backward =
     (* no backward epsilons anymore: unguarded recursion! *)
     raise UnguardedLoop
 
-let rec merge_det_full :
+let merge_det_full :
     context:context -> state_id -> det lazy_t list -> det lazy_t =
  fun ~context state_id dets ->
   match List.assoc_opt state_id !context with
   | Some det -> det
   | None ->
-      let determinise_cont det =
-        let determinise_ : nondet -> nondet =
-         fun t ->
-          let id, det = determinise ~context t in
-          Det (id, det)
-        in
-        match det with
-        | DetInp roles ->
-            let det_label (l, ({ inp_cont; _ } as inp)) =
-              (l, { inp with inp_cont = determinise_ inp_cont })
-            in
-            let det_role (r, ({ inp_labels; _ } as inp)) =
-              (r, { inp with inp_labels = List.map det_label inp_labels })
-            in
-            DetInp (List.map det_role roles)
-        | DetOut roles ->
-            let det_label (l, ({ out_cont; _ } as out)) =
-              (l, { out with out_cont = determinise_ out_cont })
-            in
-            let det_role (r, ({ out_labels; _ } as out)) =
-              (r, { out with out_labels = List.map det_label out_labels })
-            in
-            DetOut (List.map det_role roles)
-        | DetClose -> DetClose
-      in
       let det =
         lazy
           (let dets = List.map Lazy.force dets in
            match dets with
-           | [ det ] -> determinise_cont det
-           | det :: dets ->
-               let det = List.fold_left merge_det_head det dets in
-               determinise_cont det
+           | det :: dets -> List.fold_left merge_det_head det dets
            | [] -> failwith "impossible: empty merge")
       in
       context := (state_id, det) :: !context;
       det
 
-and determinise : context:context -> nondet -> state_id * det lazy_t =
+let rec determinise : context:context -> nondet -> state_id * det lazy_t =
  fun ~context t ->
+  let determinise_cont det =
+    let determinise_ t =
+      let id, det = determinise ~context t in
+      Det (id, det)
+    in
+    match det with
+    | DetInp roles ->
+        let det_label (l, ({ inp_cont; _ } as inp)) =
+          (l, { inp with inp_cont = determinise_ inp_cont })
+        in
+        let det_role (r, ({ inp_labels; _ } as inp)) =
+          (r, { inp with inp_labels = List.map det_label inp_labels })
+        in
+        DetInp (List.map det_role roles)
+    | DetOut roles ->
+        let det_label (l, ({ out_cont; _ } as out)) =
+          (l, { out with out_cont = determinise_ out_cont })
+        in
+        let det_role (r, ({ out_labels; _ } as out)) =
+          (r, { out with out_labels = List.map det_label out_labels })
+        in
+        DetOut (List.map det_role roles)
+    | DetClose -> DetClose
+  in
   let rec flatten_epsilon_cycles ~(visited : nondet list) (t : nondet) :
       (state_id * det lazy_t list, nondet list) Either.t =
     if mem_phys t visited then Right [ t ]
@@ -254,13 +251,13 @@ and determinise : context:context -> nondet -> state_id * det lazy_t =
       let visited = t :: visited in
       match t with
       | Det (id, det) -> Either.Left (id, [ det ])
-      | Concat (state_id, ts) ->
+      | Concat ts ->
+          let ids, ts = List.split @@ List.map (determinise ~context) ts in
           let det =
             lazy
-              (let _, ts = List.split @@ List.map (determinise ~context) ts in
-               let ts = List.map Lazy.force ts in
+              (let ts = List.map Lazy.force ts in
                List.fold_left concat_det (List.hd ts) (List.tl ts))
-          in
+          and state_id = List.fold_left union_ids (List.hd ids) (List.tl ids) in
           Left (state_id, [ det ])
       | Merge ts ->
           let dets, backward =
@@ -281,7 +278,10 @@ and determinise : context:context -> nondet -> state_id * det lazy_t =
           | Right backward -> filter_self_cycles t backward)
   in
   match flatten_epsilon_cycles ~visited:[] t with
-  | Left (state_id, dets) -> (state_id, merge_det_full ~context state_id dets)
+  | Left (state_id, dets) ->
+      let det = merge_det_full ~context state_id dets in
+      let det = lazy (determinise_cont (Lazy.force det)) in
+      (state_id, det)
   | Right _ -> raise UnguardedLoop
 
 let rec project0 ~context0 ~(onto : Gtype.role) (gtype : Gtype.t) : nondet =
@@ -300,7 +300,7 @@ let rec project0 ~context0 ~(onto : Gtype.role) (gtype : Gtype.t) : nondet =
   | ChoiceG (r, conts) ->
       if r.txt = onto.txt then
         let conts = List.map (project0 ~context0 ~onto) conts in
-        Concat (state_id, conts)
+        Concat conts
       else
         let conts = List.map (project0 ~context0 ~onto) conts in
         Merge conts

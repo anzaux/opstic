@@ -18,10 +18,10 @@ type t_ =
   (* a#lab ==> b :: expr >> gtyp *)
   | Routed : role * label * endpoint * role * endpoint * role * expr * t -> t_
   (* a#lab = c ==> b :: expr >> gtyp *)
-  | ChoiceG : role * t list -> t_ (* a *>> [gtyp1; gtyp2; ..]*)
+  | ChoiceG : role * t list -> t_ (* a *>> (gtyp1, gtyp2, ..) *)
   | EndG : t_ (* end *)
   | ErrG : string -> t_
-  | LetRecG : pvar * var list * t * t -> t_ (* let rec f x y = .. in e *)
+  | LetRecG : pvar * var list * t * t -> t_ (* let rec f x y = e1 in e2 *)
   | CallG : pvar * expr list -> t_ (* f e1 e2 .. *)
 (* | PureLet : var * expr * t -> t_ *)
 [@@deriving show]
