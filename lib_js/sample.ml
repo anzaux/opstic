@@ -30,55 +30,47 @@ let unparse_msg sessionid _label msg =
        ]
 
 let sample1 () =
-  let wit_a =
+  let rec wit_a =
     let open Witness in
-    (Lazy.from_val
-     @@ Witness.make_inp
-          [
-            Witness.make_inp_role ~path_kind:`Greeting
-              ~parse_label:(Witness.parse_label_default [ "args" ])
-              ~path:(Path.create "/adder") ~constr:b
-              [
-                Witness.make_inp_label ~constr:args ~parse:parse_x_y
-                  (Lazy.from_val
-                     (Witness.make_out
-                        ~labels:
-                          [
-                            Method
-                              {
-                                role = (fun x -> x#b);
-                                label = (fun x -> x#ans);
-                              };
-                            Method
-                              {
-                                role = (fun x -> x#b);
-                                label = (fun x -> x#err);
-                              };
-                          ]
-                        (object
-                           method b =
-                             object
-                               method ans =
-                                 {
-                                   out_role = Role.create "b";
-                                   out_label = "ans";
-                                   out_unparse = unparse_ans;
-                                   out_cont = Lazy.from_val Witness.close;
-                                 }
+    lazy
+      (Witness.make_inp
+         [
+           Witness.make_inp_role ~path_kind:`Greeting
+             ~parse_label:(Witness.parse_label_default [ "args" ])
+             ~path:(Path.create "/adder") ~constr:b
+             [ Witness.make_inp_label ~constr:args ~parse:parse_x_y out ];
+         ]
+        : [< `b of [< `args of _ ] ] inp witness)
+  (* NB this type annotation is mandatory for session-type safety *)
+  and out =
+    let open Witness in
+    lazy
+      (Witness.make_out
+         ~labels:
+           [
+             Method { role = (fun x -> x#b); label = (fun x -> x#ans) };
+             Method { role = (fun x -> x#b); label = (fun x -> x#err) };
+           ]
+         (object
+            method b =
+              object
+                method ans =
+                  {
+                    out_role = Role.create "b";
+                    out_label = "ans";
+                    out_unparse = unparse_ans;
+                    out_cont = wit_a;
+                  }
 
-                               method err =
-                                 {
-                                   out_role = Role.create "b";
-                                   out_label = "err";
-                                   out_unparse = unparse_msg;
-                                   out_cont = Lazy.from_val Witness.close;
-                                 }
-                             end
-                        end)));
-              ];
-          ]
-      : [< `b of [< `args of _ ] ] inp witness lazy_t)
-    (* NB this type annotation is mandatory for session-type safety *)
+                method err =
+                  {
+                    out_role = Role.create "b";
+                    out_label = "err";
+                    out_unparse = unparse_msg;
+                    out_cont = Lazy.from_val Witness.close;
+                  }
+              end
+         end))
   in
   Witness.create_service_spec ~id:"sample0" ~my_role:"a" ~other_roles:[ "b" ]
     (Lazy.force wit_a)
