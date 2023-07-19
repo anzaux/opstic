@@ -4,7 +4,7 @@ type state_id = string list
 
 type 't inp_label0 = {
   inp_label : string;
-  inp_parse_payload : expression;
+  inp_parser : expression;
   inp_cont : 't;
 }
 
@@ -16,7 +16,7 @@ and 't inp_role0 = {
 
 and 't out_label0 = {
   out_label : string;
-  out_unparse : expression;
+  out_unparser : expression;
   out_cont : 't;
 }
 
@@ -64,7 +64,7 @@ let make_out_one (r : Gtype.role) (lab : Gtype.label) (msg : expression)
         ( lab,
           {
             out_label = lab;
-            out_unparse = Gtype.make_unparser msg;
+            out_unparser = msg;
             out_cont = cont;
           } );
       ];
@@ -87,7 +87,7 @@ let make_inp_one (r : Gtype.role) (lab : Gtype.label)
         ( lab,
           {
             inp_label = lab;
-            inp_parse_payload = Gtype.make_parser msg;
+            inp_parser = msg;
             inp_cont = cont;
           } );
       ];
@@ -124,7 +124,7 @@ let full_merge mergefun x ys =
 let merge_out_labels outs1 outs2 =
   let merge_out_label o1 o2 =
     assert (o1.out_label = o2.out_label);
-    if o1.out_unparse = o2.out_unparse then
+    if o1.out_unparser = o2.out_unparser then
       { o1 with out_cont = Merge [ o1.out_cont; o2.out_cont ] }
     else failwith "unparse functions differ"
   in
@@ -144,7 +144,7 @@ let merge_out out1 out2 =
 let merge_inp_labels inps1 inps2 =
   let merge_inp_label i1 i2 =
     assert (i1.inp_label = i2.inp_label);
-    if i1.inp_parse_payload = i2.inp_parse_payload then
+    if i1.inp_parser = i2.inp_parser then
       { i1 with inp_cont = Merge [ i1.inp_cont; i2.inp_cont ] }
     else failwith "payload parse functions differ"
   in

@@ -2,7 +2,7 @@ type state_id = string list
 
 type 't inp_label0 = {
   inp_label : string;
-  inp_parse_payload : Parsetree.expression;
+  inp_parser : Parsetree.expression;
   inp_cont : 't;
 }
 
@@ -14,7 +14,7 @@ and 't inp_role0 = {
 
 and 't out_label0 = {
   out_label : string;
-  out_unparse : Parsetree.expression;
+  out_unparser : Parsetree.expression;
   out_cont : 't;
 }
 

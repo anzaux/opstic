@@ -53,89 +53,10 @@ let show x = show_t_ x.txt.body
 let role_of_exp exp =
   Ast_pattern.(parse (pexp_ident (lident __'))) exp.pexp_loc exp (fun x -> x)
 
-let endpoint_of_exp exp =
-  Ast_pattern.(parse (pexp_ident (lident __'))) exp.pexp_loc exp (fun x -> x)
-
 let role_label_of_exp exp =
   (* split `r#label` into (r,label) *)
   Ast_pattern.(parse (pexp_send (pexp_ident (lident __')) __)) exp.pexp_loc exp
     (fun r lbl -> (r, lbl))
-
-let genvar =
-  let cnt = ref 0 in
-  fun () ->
-    let n = !cnt in
-    cnt := n + 1;
-    "v" ^ string_of_int n
-
-let loc = Location.none
-
-let rec make_parser_aux (exp : expression) :
-    string list * (pattern * expression) =
-  let open Ast_helper in
-  match exp with
-  | { pexp_desc = Pexp_constant c; _ } -> ([], (Pat.constant c, exp))
-  | { pexp_desc = Pexp_variant (c, Some arg); _ } ->
-      let vars, (pat, arg) = make_parser_aux arg in
-      ( vars,
-        ( Pat.variant c (Some pat),
-          { exp with pexp_desc = Pexp_variant (c, Some arg) } ) )
-  | { pexp_desc = Pexp_construct ({ txt = Longident.Lident "()"; _ }, _); _ } ->
-      ([], (Pat.any (), [%expr `obj []]))
-  | { pexp_desc = Pexp_construct (c, arg); _ } ->
-      let vars, (pat, arg) =
-        match arg with
-        | None -> ([], (Pat.construct c None, None))
-        | Some arg ->
-            let vars, (pat, arg) = make_parser_aux arg in
-            (vars, (Pat.construct c (Some pat), Some arg))
-      in
-      (vars, (pat, { exp with pexp_desc = Pexp_construct (c, arg) }))
-  | { pexp_desc = Pexp_tuple es; _ } ->
-      let vars, patargs = List.split @@ List.map make_parser_aux es in
-      let pats, args = List.split patargs in
-      ( List.concat vars,
-        (Pat.tuple pats, { exp with pexp_desc = Pexp_tuple args }) )
-  | [%expr __] ->
-      let var = genvar () in
-      ( [ var ],
-        ( Pat.var { txt = var; loc },
-          Exp.ident { txt = Longident.parse var; loc } ) )
-  | _ ->
-      failwith
-        (Format.asprintf "cannot handle message: %a" Pprintast.expression exp)
-
-let make_unparser exp =
-  let open Ast_helper in
-  let vars, (_, exp) = make_parser_aux exp in
-  let pat =
-    if List.length vars = 0 then [%pat? ()]
-    else if List.length vars = 1 then Pat.var { txt = List.hd vars; loc }
-    else Pat.tuple (List.map (fun var -> Pat.var { txt = var; loc }) vars)
-  in
-  [%expr
-    fun _sessionid _label ->
-      [%e Exp.fun_ Nolabel None pat [%expr Monad.return [%e exp]]]]
-
-let make_parser exp =
-  let open Ast_helper in
-  let vars, (pat, _) = make_parser_aux exp in
-  let tup =
-    if List.length vars = 0 then [%expr ()]
-    else if List.length vars = 1 then
-      Exp.ident { txt = Longident.parse (List.hd vars); loc }
-    else
-      Exp.tuple
-        (List.map
-           (fun var -> Exp.ident { txt = Longident.parse var; loc })
-           vars)
-  in
-  let dflt =
-    match pat.ppat_desc with
-    | Ppat_any -> []
-    | _ -> [ Exp.case (Pat.any ()) [%expr Monad.error_with "can't parse"] ]
-  in
-  Exp.function_ (Exp.case pat [%expr Monad.return [%e tup]] :: dflt)
 
 let rec parse (exp : expression) : t =
   match exp with
