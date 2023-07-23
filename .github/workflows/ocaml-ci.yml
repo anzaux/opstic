@@ -40,6 +40,12 @@ jobs:
           node-version: ${{ matrix.node-version }}
           pr-report-test-result: ${{ matrix.node-version == 'latest' }}
 
+  tested:
+    needs: build-test
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "all tests seem to be successful"
+
   odoc-github-pages:
 
     needs: build-test
