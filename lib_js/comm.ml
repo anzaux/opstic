@@ -3,7 +3,7 @@ open Witness
 open Monad.Common
 open ServerImpl
 
-type 'a ep = 'a Witness.e = { ep_raw : Session.t; ep_witness : 'a Lin.t }
+type 'a ep = 'a Witness.ep = { ep_raw : Session.t; ep_witness : 'a Lin.t }
 type 'm inp = 'm Witness.inp
 type ('v, 'a) out = ('v, 'a) Witness.out
 type 'x service_spec = 'x Witness.service_spec
