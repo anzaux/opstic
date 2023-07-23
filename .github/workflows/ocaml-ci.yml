@@ -50,8 +50,7 @@ jobs:
 
     needs: build-test
 
-    ## FIXME: ci-improvements => main
-    if: ${{ github.repository == 'anzaux/opstic' && github.event_name == 'push' && github.ref == 'refs/heads/ci-improvements' }}
+    if: ${{ github.repository == 'anzaux/opstic' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
     environment:
       name: github-pages
