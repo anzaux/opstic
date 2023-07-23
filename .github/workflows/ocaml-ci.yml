@@ -72,7 +72,7 @@ jobs:
           with-odoc: true
           odoc-build-command: |
             echo vendors/kxclib vendors/prr vendors/rows . | xargs -n1 \
-              dune build @doc-private @doc --build-dir="$(pwd)/_build" --root
+              opam exec -- dune build @doc-private @doc --build-dir="$(pwd)/_build" --root
           odoc-upload-artifact: true
           odoc-upload-artifact-name: "github-pages"
 
